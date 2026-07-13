@@ -11,7 +11,7 @@
 
 ### Bidirectional (RTL) & Cursive Shaping Support
 Termux natively supports Right-to-Left (RTL) bidirectional text flow and cursive font shaping for Arabic, Persian, Urdu, Hebrew, and other RTL languages:
-- **Native RTL/LTR Bidirectional Flow**: Reorders visual runs using Java's standard `Bidi` algorithm while keeping trailing space alignment intact next to the command prompt.
+- **Native RTL/LTR Bidirectional Flow**: Correctly reorders visual text runs using Java's standard `Bidi` algorithm while keeping trailing space alignment intact next to the command prompt.
 - **Flawless Cursive Joining**: Leverages Android's native font engine (`Typeface.DEFAULT`) and `drawTextRun` to shape Arabic, Persian, and Urdu letters into continuous cursive words.
 - **Monospace Grid Alignment**: Automatically scale-fits proportional Arabic text runs to fit precisely within monospace terminal grid columns.
 - **Zero-Allocation Layout Caching**: Caches and updates cursor/selection flags in-place on frame refreshes for smooth 60/120 FPS rendering.
