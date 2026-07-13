@@ -13,6 +13,7 @@ public final class BidiLayout {
         public boolean insideCursor;
         public boolean insideSelection;
         public int originalColumn;
+        public boolean isRtl;
         public int[] combiningChars = null;
         public int combiningCount = 0;
 
@@ -40,7 +41,7 @@ public final class BidiLayout {
 
     /**
      * Builds or retrieves a cached visual layout for a terminal row.
-     * Maps logical terminal grid columns to visual characters and manages RTL/LTR reordering and shaping.
+     * Maps logical terminal grid columns to visual characters and manages RTL/LTR reordering.
      * Uses a fast-path caching strategy to update cursor and selection states in-place,
      * avoiding Bidi calculations and array allocations on frame refreshes.
      */
@@ -72,6 +73,7 @@ public final class BidiLayout {
             logicalCells[i].insideCursor = (i == cursorCol && cursorVisible);
             logicalCells[i].insideSelection = (i >= selx1 && i <= selx2);
             logicalCells[i].originalColumn = i;
+            logicalCells[i].isRtl = false;
         }
 
         char[] line = rowObject.mText;
@@ -119,9 +121,6 @@ public final class BidiLayout {
             }
             column += w;
         }
-
-        // Shape Arabic/Persian in logical order
-        ArabicShaper.shape(logicalCells);
 
         // 3. Trailing Space Protection: Scan for the last active column
         int activeLength = 0;
@@ -175,6 +174,7 @@ public final class BidiLayout {
             for (int i = 0; i < activeLength; i++) {
                 levels[i] = (byte) bidi.getLevelAt(i);
                 activeVisualToLogical[i] = i;
+                logicalCells[i].isRtl = (levels[i] % 2 != 0);
             }
             Bidi.reorderVisually(levels, 0, activeVisualToLogical, 0, activeLength);
 
