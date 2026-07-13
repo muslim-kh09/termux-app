@@ -119,7 +119,7 @@ public final class TerminalRenderer {
                     measuredCodePointWidth = mTextPaint.measureText(tempMeasure, 0, tempLen);
                 }
 
-                final boolean fontWidthMismatch = codePointWcWidth > 0 && Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
+                final boolean fontWidthMismatch = !isRtl && codePointWcWidth > 0 && Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
 
                 if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || isRtl != lastRunIsRtl || fontWidthMismatch || lastRunFontWidthMismatch) {
                     if (vCol == 0) {
