@@ -171,6 +171,12 @@ public final class TerminalRenderer {
                             }
                         }
 
+                        // Set system default typeface for RTL runs to enable native cursive shaping
+                        Typeface originalTypeface = mTextPaint.getTypeface();
+                        if (lastRunIsRtl) {
+                            mTextPaint.setTypeface(Typeface.DEFAULT);
+                        }
+
                         float measuredWidthForRun = 0f;
                         if (lastRunIsRtl) {
                             measuredWidthForRun = mTextPaint.measureText(runBuffer, 0, runBufferUsed);
@@ -197,6 +203,10 @@ public final class TerminalRenderer {
                         drawTextRun(canvas, runBuffer, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun,
                             0, runBufferUsed, measuredWidthForRun,
                             cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection, lastRunIsRtl);
+
+                        if (lastRunIsRtl) {
+                            mTextPaint.setTypeface(originalTypeface);
+                        }
                     }
                     lastRunStyle = style;
                     lastRunInsideCursor = insideCursor;
@@ -256,6 +266,12 @@ public final class TerminalRenderer {
                     }
                 }
 
+                // Set system default typeface for RTL runs
+                Typeface originalTypeface = mTextPaint.getTypeface();
+                if (lastRunIsRtl) {
+                    mTextPaint.setTypeface(Typeface.DEFAULT);
+                }
+
                 float measuredWidthForRun = 0f;
                 if (lastRunIsRtl) {
                     measuredWidthForRun = mTextPaint.measureText(runBuffer, 0, runBufferUsed);
@@ -282,6 +298,10 @@ public final class TerminalRenderer {
                 drawTextRun(canvas, runBuffer, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun,
                     0, runBufferUsed, measuredWidthForRun,
                     cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection, lastRunIsRtl);
+
+                if (lastRunIsRtl) {
+                    mTextPaint.setTypeface(originalTypeface);
+                }
             }
         }
     }
