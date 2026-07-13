@@ -82,7 +82,7 @@ public final class TerminalRenderer {
             TerminalRow lineObject = screen.allocateFullLineIfNecessary(screen.externalToInternalRow(row));
             
             // Build / retrieve cached visual layout
-            BidiLayout layout = BidiLayout.build(lineObject, columns, cursorCol, row == cursorRow && cursorVisible, selx1, selx2);
+            BidiLayout layout = BidiLayout.build(lineObject, columns, cursorCol, row == cursorRow && cursorVisible, selx1, selx2, true);
             BidiLayout.LogicalCell[] visualCells = layout.visualCells;
 
             long lastRunStyle = 0;
@@ -324,7 +324,7 @@ public final class TerminalRenderer {
         if (rowObject == null) {
             return visualCol;
         }
-        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1);
+        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1, false);
         return layout.visualToLogical[visualCol];
     }
 
@@ -341,7 +341,7 @@ public final class TerminalRenderer {
         if (rowObject == null) {
             return logicalCol;
         }
-        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1);
+        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1, false);
         return layout.logicalToVisual[logicalCol];
     }
 }

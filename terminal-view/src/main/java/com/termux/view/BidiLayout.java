@@ -44,16 +44,19 @@ public final class BidiLayout {
      * Uses a fast-path caching strategy to update cursor and selection states in-place,
      * avoiding Bidi calculations and array allocations on frame refreshes.
      */
-    public static BidiLayout build(TerminalRow rowObject, int columns, int cursorCol, boolean cursorVisible, int selx1, int selx2) {
-        // 1. Fast-path: Check cached layout (zero allocations, O(N) update of dynamic attributes)
+    public static BidiLayout build(TerminalRow rowObject, int columns, int cursorCol, boolean cursorVisible, int selx1, int selx2, boolean isForRendering) {
+        // 1. Fast-path: Check cached layout
         if (rowObject.mCachedBidiLayout instanceof BidiLayout) {
             BidiLayout cached = (BidiLayout) rowObject.mCachedBidiLayout;
             if (cached.visualCells.length == columns) {
-                for (int i = 0; i < columns; i++) {
-                    LogicalCell cell = cached.visualCells[i];
-                    int lCol = cached.visualToLogical[i];
-                    cell.insideCursor = (lCol == cursorCol && cursorVisible);
-                    cell.insideSelection = (lCol >= selx1 && lCol <= selx2);
+                if (isForRendering) {
+                    // Update cursor and selection flags in-place (extremely fast, zero-allocation)
+                    for (int i = 0; i < columns; i++) {
+                        LogicalCell cell = cached.visualCells[i];
+                        int lCol = cached.visualToLogical[i];
+                        cell.insideCursor = (lCol == cursorCol && cursorVisible);
+                        cell.insideSelection = (lCol >= selx1 && lCol <= selx2);
+                    }
                 }
                 return cached;
             }
@@ -117,12 +120,37 @@ public final class BidiLayout {
             column += w;
         }
 
-        // Shape Arabic/Persian
+        // Shape Arabic/Persian in logical order
         ArabicShaper.shape(logicalCells);
 
-        // Convert to Char array for Bidi
-        char[] bidiChars = new char[columns];
-        for (int i = 0; i < columns; i++) {
+        // 3. Trailing Space Protection: Scan for the last active column
+        int activeLength = 0;
+        for (int i = columns - 1; i >= 0; i--) {
+            if (logicalCells[i].codePoint != ' ' && logicalCells[i].codePoint != 0) {
+                activeLength = i + 1;
+                break;
+            }
+        }
+
+        int[] logicalToVisual = new int[columns];
+        int[] visualToLogical = new int[columns];
+        LogicalCell[] visualCells = new LogicalCell[columns];
+
+        if (activeLength <= 0) {
+            // Whole line is blank, identity mapping
+            for (int i = 0; i < columns; i++) {
+                logicalToVisual[i] = i;
+                visualToLogical[i] = i;
+                visualCells[i] = logicalCells[i];
+            }
+            BidiLayout newLayout = new BidiLayout(visualCells, logicalToVisual, visualToLogical);
+            rowObject.mCachedBidiLayout = newLayout;
+            return newLayout;
+        }
+
+        // Convert to Char array for Bidi (active portion only)
+        char[] bidiChars = new char[activeLength];
+        for (int i = 0; i < activeLength; i++) {
             int cp = logicalCells[i].codePoint;
             if (cp == 0) {
                 bidiChars[i] = ' ';
@@ -133,36 +161,39 @@ public final class BidiLayout {
             }
         }
 
-        Bidi bidi = new Bidi(bidiChars, 0, null, 0, columns, Bidi.DIRECTION_DEFAULT_LEFT_TO_RIGHT);
-        int[] logicalToVisual = new int[columns];
-        int[] visualToLogical = new int[columns];
+        Bidi bidi = new Bidi(bidiChars, 0, null, 0, activeLength, Bidi.DIRECTION_DEFAULT_LEFT_TO_RIGHT);
 
-        BidiLayout newLayout;
         if (bidi.isLeftToRight()) {
             for (int i = 0; i < columns; i++) {
                 logicalToVisual[i] = i;
                 visualToLogical[i] = i;
+                visualCells[i] = logicalCells[i];
             }
-            newLayout = new BidiLayout(logicalCells, logicalToVisual, visualToLogical);
         } else {
-            byte[] levels = new byte[columns];
-            Integer[] visualToLogicalObj = new Integer[columns];
-            for (int i = 0; i < columns; i++) {
+            byte[] levels = new byte[activeLength];
+            Integer[] activeVisualToLogical = new Integer[activeLength];
+            for (int i = 0; i < activeLength; i++) {
                 levels[i] = (byte) bidi.getLevelAt(i);
-                visualToLogicalObj[i] = i;
+                activeVisualToLogical[i] = i;
             }
-            Bidi.reorderVisually(levels, 0, visualToLogicalObj, 0, columns);
+            Bidi.reorderVisually(levels, 0, activeVisualToLogical, 0, activeLength);
 
-            LogicalCell[] visualCells = new LogicalCell[columns];
-            for (int i = 0; i < columns; i++) {
-                visualToLogical[i] = visualToLogicalObj[i];
+            // Map active reordered portion
+            for (int i = 0; i < activeLength; i++) {
+                visualToLogical[i] = activeVisualToLogical[i];
                 logicalToVisual[visualToLogical[i]] = i;
                 visualCells[i] = logicalCells[visualToLogical[i]];
             }
-            newLayout = new BidiLayout(visualCells, logicalToVisual, visualToLogical);
+
+            // Map trailing portion as identity (forces spaces to remain LTR on the right)
+            for (int i = activeLength; i < columns; i++) {
+                logicalToVisual[i] = i;
+                visualToLogical[i] = i;
+                visualCells[i] = logicalCells[i];
+            }
         }
 
-        // Cache the newly created layout
+        BidiLayout newLayout = new BidiLayout(visualCells, logicalToVisual, visualToLogical);
         rowObject.mCachedBidiLayout = newLayout;
         return newLayout;
     }

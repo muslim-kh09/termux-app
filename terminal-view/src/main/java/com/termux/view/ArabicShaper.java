@@ -133,8 +133,18 @@ public final class ArabicShaper {
 
                     if (ligatureCp != 0) {
                         cell.codePoint = ligatureCp;
+                        
+                        // Clean Ligature Processing: Move combining characters from ALIF to LAM cell
+                        if (cells[nextIdx].combiningChars != null) {
+                            for (int k = 0; k < cells[nextIdx].combiningCount; k++) {
+                                cell.addCombining(cells[nextIdx].combiningChars[k]);
+                            }
+                            cells[nextIdx].combiningChars = null;
+                            cells[nextIdx].combiningCount = 0;
+                        }
+                        
                         cells[nextIdx].codePoint = 0; // Clear the Alif cell
-                        cells[nextIdx].displayWidth = 0;
+                        cells[nextIdx].displayWidth = 1; // Preserve width 1 to maintain grid cell flow
                     }
                 }
             }
