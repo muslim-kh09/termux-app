@@ -73,7 +73,6 @@ public final class TerminalRenderer {
         for (int row = topRow; row < endRow; row++) {
             heightOffset += mFontLineSpacing;
 
-            final int cursorX = (row == cursorRow && cursorVisible) ? cursorCol : -1;
             int selx1 = -1, selx2 = -1;
             if (row >= selectionY1 && row <= selectionY2) {
                 if (row == selectionY1) selx1 = selectionX1;
@@ -81,78 +80,143 @@ public final class TerminalRenderer {
             }
 
             TerminalRow lineObject = screen.allocateFullLineIfNecessary(screen.externalToInternalRow(row));
-            final char[] line = lineObject.mText;
-            final int charsUsedInLine = lineObject.getSpaceUsed();
+            
+            // Build / retrieve cached visual layout
+            BidiLayout layout = BidiLayout.build(lineObject, columns, cursorCol, row == cursorRow && cursorVisible, selx1, selx2);
+            BidiLayout.LogicalCell[] visualCells = layout.visualCells;
 
             long lastRunStyle = 0;
             boolean lastRunInsideCursor = false;
             boolean lastRunInsideSelection = false;
             int lastRunStartColumn = -1;
-            int lastRunStartIndex = 0;
+            int runStartBufferOffset = 0;
             boolean lastRunFontWidthMismatch = false;
-            int currentCharIndex = 0;
-            float measuredWidthForRun = 0.f;
 
-            for (int column = 0; column < columns; ) {
-                final char charAtIndex = line[currentCharIndex];
-                final boolean charIsHighsurrogate = Character.isHighSurrogate(charAtIndex);
-                final int charsForCodePoint = charIsHighsurrogate ? 2 : 1;
-                final int codePoint = charIsHighsurrogate ? Character.toCodePoint(charAtIndex, line[currentCharIndex + 1]) : charAtIndex;
-                final int codePointWcWidth = WcWidth.width(codePoint);
-                final boolean insideCursor = (cursorX == column || (codePointWcWidth == 2 && cursorX == column + 1));
-                final boolean insideSelection = column >= selx1 && column <= selx2;
-                final long style = lineObject.getStyle(column);
+            char[] drawBuffer = new char[columns * 4];
+            int drawBufferUsed = 0;
 
-                // Check if the measured text width for this code point is not the same as that expected by wcwidth().
-                // This could happen for some fonts which are not truly monospace, or for more exotic characters such as
-                // smileys which android font renders as wide.
-                // If this is detected, we draw this code point scaled to match what wcwidth() expects.
-                final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint] : mTextPaint.measureText(line,
-                    currentCharIndex, charsForCodePoint);
-                final boolean fontWidthMismatch = Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
+            for (int vCol = 0; vCol < columns; ) {
+                BidiLayout.LogicalCell cell = visualCells[vCol];
+                if (cell.displayWidth == 0 && cell.codePoint == 0) {
+                    vCol++;
+                    continue;
+                }
+
+                final boolean insideCursor = cell.insideCursor;
+                final boolean insideSelection = cell.insideSelection;
+                final long style = cell.style;
+                final int codePoint = cell.codePoint;
+                final int codePointWcWidth = cell.displayWidth;
+
+                float measuredCodePointWidth = 0f;
+                char[] tempMeasure = new char[4];
+                int tempLen = 0;
+                if (codePoint != 0) {
+                    tempLen = Character.toChars(codePoint, tempMeasure, 0);
+                    if (cell.combiningChars != null) {
+                        for (int i = 0; i < cell.combiningCount; i++) {
+                            tempLen += Character.toChars(cell.combiningChars[i], tempMeasure, tempLen);
+                        }
+                    }
+                    measuredCodePointWidth = mTextPaint.measureText(tempMeasure, 0, tempLen);
+                }
+
+                final boolean fontWidthMismatch = codePointWcWidth > 0 && Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
 
                 if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || fontWidthMismatch || lastRunFontWidthMismatch) {
-                    if (column == 0) {
-                        // Skip first column as there is nothing to draw, just record the current style.
+                    if (vCol == 0) {
+                        // Skip first column
                     } else {
-                        final int columnWidthSinceLastRun = column - lastRunStartColumn;
-                        final int charsSinceLastRun = currentCharIndex - lastRunStartIndex;
+                        final int columnWidthSinceLastRun = vCol - lastRunStartColumn;
+                        final int charsSinceLastRun = drawBufferUsed - runStartBufferOffset;
                         int cursorColor = lastRunInsideCursor ? mEmulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_CURSOR] : 0;
                         boolean invertCursorTextColor = false;
                         if (lastRunInsideCursor && cursorShape == TerminalEmulator.TERMINAL_CURSOR_STYLE_BLOCK) {
                             invertCursorTextColor = true;
                         }
-                        drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun,
-                            lastRunStartIndex, charsSinceLastRun, measuredWidthForRun,
+
+                        float measuredWidthForRun = 0f;
+                        if (lastRunFontWidthMismatch) {
+                            for (int c = lastRunStartColumn; c < vCol; c++) {
+                                BidiLayout.LogicalCell rc = visualCells[c];
+                                if (rc.displayWidth == 0 && rc.codePoint == 0) continue;
+                                if (rc.codePoint != 0) {
+                                    char[] t = new char[4];
+                                    int tl = Character.toChars(rc.codePoint, t, 0);
+                                    if (rc.combiningChars != null) {
+                                        for (int i = 0; i < rc.combiningCount; i++) {
+                                            tl += Character.toChars(rc.combiningChars[i], t, tl);
+                                        }
+                                    }
+                                    measuredWidthForRun += mTextPaint.measureText(t, 0, tl);
+                                } else {
+                                    measuredWidthForRun += mFontWidth;
+                                }
+                            }
+                        } else {
+                            measuredWidthForRun = columnWidthSinceLastRun * mFontWidth;
+                        }
+
+                        drawTextRun(canvas, drawBuffer, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun,
+                            runStartBufferOffset, charsSinceLastRun, measuredWidthForRun,
                             cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
                     }
-                    measuredWidthForRun = 0.f;
                     lastRunStyle = style;
                     lastRunInsideCursor = insideCursor;
                     lastRunInsideSelection = insideSelection;
-                    lastRunStartColumn = column;
-                    lastRunStartIndex = currentCharIndex;
+                    lastRunStartColumn = vCol;
+                    runStartBufferOffset = drawBufferUsed;
                     lastRunFontWidthMismatch = fontWidthMismatch;
                 }
-                measuredWidthForRun += measuredCodePointWidth;
-                column += codePointWcWidth;
-                currentCharIndex += charsForCodePoint;
-                while (currentCharIndex < charsUsedInLine && WcWidth.width(line, currentCharIndex) <= 0) {
-                    // Eat combining chars so that they are treated as part of the last non-combining code point,
-                    // instead of e.g. being considered inside the cursor in the next run.
-                    currentCharIndex += Character.isHighSurrogate(line[currentCharIndex]) ? 2 : 1;
+
+                if (codePoint != 0) {
+                    drawBufferUsed += Character.toChars(codePoint, drawBuffer, drawBufferUsed);
+                    if (cell.combiningChars != null) {
+                        for (int i = 0; i < cell.combiningCount; i++) {
+                            drawBufferUsed += Character.toChars(cell.combiningChars[i], drawBuffer, drawBufferUsed);
+                        }
+                    }
+                } else if (codePointWcWidth > 0) {
+                    drawBuffer[drawBufferUsed++] = ' ';
                 }
+                vCol += codePointWcWidth;
             }
 
-            final int columnWidthSinceLastRun = columns - lastRunStartColumn;
-            final int charsSinceLastRun = currentCharIndex - lastRunStartIndex;
-            int cursorColor = lastRunInsideCursor ? mEmulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_CURSOR] : 0;
-            boolean invertCursorTextColor = false;
-            if (lastRunInsideCursor && cursorShape == TerminalEmulator.TERMINAL_CURSOR_STYLE_BLOCK) {
-                invertCursorTextColor = true;
+            if (columns > lastRunStartColumn) {
+                final int columnWidthSinceLastRun = columns - lastRunStartColumn;
+                final int charsSinceLastRun = drawBufferUsed - runStartBufferOffset;
+                int cursorColor = lastRunInsideCursor ? mEmulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_CURSOR] : 0;
+                boolean invertCursorTextColor = false;
+                if (lastRunInsideCursor && cursorShape == TerminalEmulator.TERMINAL_CURSOR_STYLE_BLOCK) {
+                    invertCursorTextColor = true;
+                }
+
+                float measuredWidthForRun = 0f;
+                if (lastRunFontWidthMismatch) {
+                    for (int c = lastRunStartColumn; c < columns; c++) {
+                        BidiLayout.LogicalCell rc = visualCells[c];
+                        if (rc.displayWidth == 0 && rc.codePoint == 0) continue;
+                        if (rc.codePoint != 0) {
+                            char[] t = new char[4];
+                            int tl = Character.toChars(rc.codePoint, t, 0);
+                            if (rc.combiningChars != null) {
+                                for (int i = 0; i < rc.combiningCount; i++) {
+                                    tl += Character.toChars(rc.combiningChars[i], t, tl);
+                                }
+                            }
+                            measuredWidthForRun += mTextPaint.measureText(t, 0, tl);
+                        } else {
+                            measuredWidthForRun += mFontWidth;
+                        }
+                    }
+                } else {
+                    measuredWidthForRun = columnWidthSinceLastRun * mFontWidth;
+                }
+
+                drawTextRun(canvas, drawBuffer, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun,
+                    runStartBufferOffset, charsSinceLastRun, measuredWidthForRun,
+                    cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
             }
-            drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun, lastRunStartIndex, charsSinceLastRun,
-                measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
         }
     }
 
@@ -245,5 +309,39 @@ public final class TerminalRenderer {
 
     public int getFontLineSpacing() {
         return mFontLineSpacing;
+    }
+
+    public int translateVisualToLogicalColumn(TerminalEmulator mEmulator, int visualCol, int row) {
+        if (visualCol < 0) return 0;
+        if (visualCol >= mEmulator.mColumns) return mEmulator.mColumns - 1;
+
+        TerminalBuffer screen = mEmulator.getScreen();
+        int internalRow = screen.externalToInternalRow(row);
+        if (internalRow < 0 || internalRow >= screen.getActiveRows()) {
+            return visualCol;
+        }
+        TerminalRow rowObject = screen.allocateFullLineIfNecessary(internalRow);
+        if (rowObject == null) {
+            return visualCol;
+        }
+        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1);
+        return layout.visualToLogical[visualCol];
+    }
+
+    public int translateLogicalToVisualColumn(TerminalEmulator mEmulator, int logicalCol, int row) {
+        if (logicalCol < 0) return 0;
+        if (logicalCol >= mEmulator.mColumns) return mEmulator.mColumns - 1;
+
+        TerminalBuffer screen = mEmulator.getScreen();
+        int internalRow = screen.externalToInternalRow(row);
+        if (internalRow < 0 || internalRow >= screen.getActiveRows()) {
+            return logicalCol;
+        }
+        TerminalRow rowObject = screen.allocateFullLineIfNecessary(internalRow);
+        if (rowObject == null) {
+            return logicalCol;
+        }
+        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1);
+        return layout.logicalToVisual[logicalCol];
     }
 }

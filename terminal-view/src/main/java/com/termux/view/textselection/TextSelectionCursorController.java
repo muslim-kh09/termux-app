@@ -219,8 +219,8 @@ public class TextSelectionCursorController implements CursorController {
         TerminalBuffer screen = terminalView.mEmulator.getScreen();
         final int scrollRows = screen.getActiveRows() - terminalView.mEmulator.mRows;
         if (handle == mStartHandle) {
-            mSelX1 = terminalView.getCursorX(x);
             mSelY1 = terminalView.getCursorY(y);
+            mSelX1 = terminalView.getCursorX(x, mSelY1);
             if (mSelX1 < 0) {
                 mSelX1 = 0;
             }
@@ -261,8 +261,8 @@ public class TextSelectionCursorController implements CursorController {
             mSelX1 = getValidCurX(screen, mSelY1, mSelX1);
 
         } else {
-            mSelX2 = terminalView.getCursorX(x);
             mSelY2 = terminalView.getCursorY(y);
+            mSelX2 = terminalView.getCursorX(x, mSelY2);
             if (mSelX2 < 0) {
                 mSelX2 = 0;
             }
