@@ -8,6 +8,9 @@ public final class ArabicShaper {
     private static int getJoiningType(int cp) {
         if (cp == 0) return JOINING_NONE;
 
+        // Treat LAM-ALIF presentation form ligatures as right-joining
+        if (cp >= 0xFEF5 && cp <= 0xFEFC) return JOINING_RIGHT;
+
         if (cp >= 0x0600 && cp <= 0x06FF) {
             if (cp >= 0x064B && cp <= 0x065F) return JOINING_NONE; // Diacritics
             if (cp == 0x0670) return JOINING_NONE; // Super-script Alif
@@ -180,8 +183,22 @@ public final class ArabicShaper {
                 nextIdx++;
             }
 
-            boolean connectsRight = prevCp != 0 && (getJoiningType(prevCp) == JOINING_DUAL || getJoiningType(prevCp) == JOINING_RIGHT);
-            boolean connectsLeft = nextCp != 0 && getJoiningType(nextCp) == JOINING_DUAL;
+            // Connection Rules:
+            // connectsRight: previous character must be DUAL joining, and current must be DUAL or RIGHT joining.
+            boolean connectsRight = false;
+            if (prevCp != 0) {
+                int prevJoin = getJoiningType(prevCp);
+                int currJoin = getJoiningType(cp);
+                connectsRight = (prevJoin == JOINING_DUAL) && (currJoin == JOINING_DUAL || currJoin == JOINING_RIGHT);
+            }
+
+            // connectsLeft: current character must be DUAL joining, and next must be DUAL or RIGHT joining.
+            boolean connectsLeft = false;
+            if (nextCp != 0) {
+                int currJoin = getJoiningType(cp);
+                int nextJoin = getJoiningType(nextCp);
+                connectsLeft = (currJoin == JOINING_DUAL) && (nextJoin == JOINING_DUAL || nextJoin == JOINING_RIGHT);
+            }
 
             if (isLigature) {
                 if (connectsRight) {
