@@ -38,12 +38,17 @@ public final class BidiLayout {
         this.visualToLogical = visualToLogical;
     }
 
+    /**
+     * Builds or retrieves a cached visual layout for a terminal row.
+     * Maps logical terminal grid columns to visual characters and manages RTL/LTR reordering and shaping.
+     * Uses a fast-path caching strategy to update cursor and selection states in-place,
+     * avoiding Bidi calculations and array allocations on frame refreshes.
+     */
     public static BidiLayout build(TerminalRow rowObject, int columns, int cursorCol, boolean cursorVisible, int selx1, int selx2) {
-        // 1. Check cached layout first
+        // 1. Fast-path: Check cached layout (zero allocations, O(N) update of dynamic attributes)
         if (rowObject.mCachedBidiLayout instanceof BidiLayout) {
             BidiLayout cached = (BidiLayout) rowObject.mCachedBidiLayout;
             if (cached.visualCells.length == columns) {
-                // Update cursor and selection flags in-place (extremely fast, zero-allocation)
                 for (int i = 0; i < columns; i++) {
                     LogicalCell cell = cached.visualCells[i];
                     int lCol = cached.visualToLogical[i];
