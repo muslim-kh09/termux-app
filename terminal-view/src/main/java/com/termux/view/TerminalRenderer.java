@@ -396,7 +396,7 @@ public final class TerminalRenderer {
         TerminalRow rowObject = screen.allocateFullLineIfNecessary(internalRow);
         if (rowObject == null) return visualCol;
 
-        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1, false);
+        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1, -1, -1, -1, false);
         return layout.visualToLogical[visualCol];
     }
 
@@ -413,7 +413,7 @@ public final class TerminalRenderer {
         TerminalRow rowObject = screen.allocateFullLineIfNecessary(internalRow);
         if (rowObject == null) return logicalCol;
 
-        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1, false);
+        BidiLayout layout = BidiLayout.build(rowObject, mEmulator.mColumns, -1, false, -1, -1, -1, -1, -1, false);
         return layout.logicalToVisual[logicalCol];
     }
 }
