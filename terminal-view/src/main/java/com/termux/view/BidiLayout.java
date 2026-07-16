@@ -45,18 +45,42 @@ public final class BidiLayout {
      * Uses a fast-path caching strategy to update cursor and selection states in-place,
      * avoiding Bidi calculations and array allocations on frame refreshes.
      */
-    public static BidiLayout build(TerminalRow rowObject, int columns, int cursorCol, boolean cursorVisible, int selx1, int selx2, boolean isForRendering) {
+    public static BidiLayout build(TerminalRow rowObject, int columns, int cursorCol, boolean cursorVisible,
+                                   int selectionY1, int selectionY2, int selectionX1, int selectionX2, int row,
+                                   boolean isForRendering) {
         // 1. Fast-path: Check cached layout
         if (rowObject.mCachedBidiLayout instanceof BidiLayout) {
             BidiLayout cached = (BidiLayout) rowObject.mCachedBidiLayout;
             if (cached.visualCells.length == columns) {
                 if (isForRendering) {
                     // Update cursor and selection flags in-place (extremely fast, zero-allocation)
+                    int vSelStart = -1;
+                    int vSelEnd = -1;
+                    boolean hasSel = false;
+                    if (row >= selectionY1 && row <= selectionY2) {
+                        hasSel = true;
+                        if (selectionY1 == selectionY2) {
+                            int v1 = cached.logicalToVisual[Math.min(columns - 1, Math.max(0, selectionX1))];
+                            int v2 = cached.logicalToVisual[Math.min(columns - 1, Math.max(0, selectionX2))];
+                            vSelStart = Math.min(v1, v2);
+                            vSelEnd = Math.max(v1, v2);
+                        } else if (row == selectionY1) {
+                            vSelStart = cached.logicalToVisual[Math.min(columns - 1, Math.max(0, selectionX1))];
+                            vSelEnd = columns - 1;
+                        } else if (row == selectionY2) {
+                            vSelStart = 0;
+                            vSelEnd = cached.logicalToVisual[Math.min(columns - 1, Math.max(0, selectionX2))];
+                        } else {
+                            vSelStart = 0;
+                            vSelEnd = columns - 1;
+                        }
+                    }
+
                     for (int i = 0; i < columns; i++) {
                         LogicalCell cell = cached.visualCells[i];
                         int lCol = cached.visualToLogical[i];
                         cell.insideCursor = (lCol == cursorCol && cursorVisible);
-                        cell.insideSelection = (lCol >= selx1 && lCol <= selx2);
+                        cell.insideSelection = hasSel && (i >= vSelStart && i <= vSelEnd);
                     }
                 }
                 return cached;
@@ -71,7 +95,7 @@ public final class BidiLayout {
             logicalCells[i].displayWidth = 1;
             logicalCells[i].style = rowObject.getStyle(i);
             logicalCells[i].insideCursor = (i == cursorCol && cursorVisible);
-            logicalCells[i].insideSelection = (i >= selx1 && i <= selx2);
+            logicalCells[i].insideSelection = false;
             logicalCells[i].originalColumn = i;
             logicalCells[i].isRtl = false;
         }
@@ -143,6 +167,8 @@ public final class BidiLayout {
                 visualCells[i] = logicalCells[i];
             }
             BidiLayout newLayout = new BidiLayout(visualCells, logicalToVisual, visualToLogical);
+            rowObject.mLogicalToVisual = logicalToVisual;
+            rowObject.mVisualToLogical = visualToLogical;
             rowObject.mCachedBidiLayout = newLayout;
             return newLayout;
         }
@@ -193,7 +219,39 @@ public final class BidiLayout {
             }
         }
 
+        // Populate visual selection
+        int vSelStart = -1;
+        int vSelEnd = -1;
+        boolean hasSel = false;
+        if (row >= selectionY1 && row <= selectionY2) {
+            hasSel = true;
+            if (selectionY1 == selectionY2) {
+                int v1 = logicalToVisual[Math.min(columns - 1, Math.max(0, selectionX1))];
+                int v2 = logicalToVisual[Math.min(columns - 1, Math.max(0, selectionX2))];
+                vSelStart = Math.min(v1, v2);
+                vSelEnd = Math.max(v1, v2);
+            } else if (row == selectionY1) {
+                vSelStart = logicalToVisual[Math.min(columns - 1, Math.max(0, selectionX1))];
+                vSelEnd = columns - 1;
+            } else if (row == selectionY2) {
+                vSelStart = 0;
+                vSelEnd = logicalToVisual[Math.min(columns - 1, Math.max(0, selectionX2))];
+            } else {
+                vSelStart = 0;
+                vSelEnd = columns - 1;
+            }
+        }
+
+        for (int i = 0; i < columns; i++) {
+            LogicalCell cell = visualCells[i];
+            int lCol = visualToLogical[i];
+            cell.insideCursor = (lCol == cursorCol && cursorVisible);
+            cell.insideSelection = hasSel && (i >= vSelStart && i <= vSelEnd);
+        }
+
         BidiLayout newLayout = new BidiLayout(visualCells, logicalToVisual, visualToLogical);
+        rowObject.mLogicalToVisual = logicalToVisual;
+        rowObject.mVisualToLogical = visualToLogical;
         rowObject.mCachedBidiLayout = newLayout;
         return newLayout;
     }

@@ -90,15 +90,9 @@ public final class TerminalRenderer {
         for (int row = topRow; row < endRow; row++) {
             heightOffset += mFontLineSpacing;
 
-            int selx1 = -1, selx2 = -1;
-            if (row >= selectionY1 && row <= selectionY2) {
-                if (row == selectionY1) selx1 = selectionX1;
-                selx2 = (row == selectionY2) ? selectionX2 : mEmulator.mColumns;
-            }
-
             TerminalRow lineObject = screen.allocateFullLineIfNecessary(screen.externalToInternalRow(row));
             BidiLayout layout = BidiLayout.build(lineObject, columns, cursorCol,
-                    row == cursorRow && cursorVisible, selx1, selx2, true);
+                    row == cursorRow && cursorVisible, selectionY1, selectionY2, selectionX1, selectionX2, row, true);
             BidiLayout.LogicalCell[] visualCells = layout.visualCells;
 
             long lastRunStyle = 0;
@@ -394,6 +388,8 @@ public final class TerminalRenderer {
         if (visualCol >= mEmulator.mColumns) return mEmulator.mColumns - 1;
 
         TerminalBuffer screen = mEmulator.getScreen();
+        if (row < -screen.getActiveTranscriptRows() || row >= mEmulator.mRows) return visualCol;
+
         int internalRow = screen.externalToInternalRow(row);
         if (internalRow < 0 || internalRow >= screen.getActiveRows()) return visualCol;
 
@@ -409,6 +405,8 @@ public final class TerminalRenderer {
         if (logicalCol >= mEmulator.mColumns) return mEmulator.mColumns - 1;
 
         TerminalBuffer screen = mEmulator.getScreen();
+        if (row < -screen.getActiveTranscriptRows() || row >= mEmulator.mRows) return logicalCol;
+
         int internalRow = screen.externalToInternalRow(row);
         if (internalRow < 0 || internalRow >= screen.getActiveRows()) return logicalCol;
 
