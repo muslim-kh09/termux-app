@@ -2142,6 +2142,7 @@ public final class TerminalEmulator {
         state.mUseLineDrawingG0 = mUseLineDrawingG0;
         state.mUseLineDrawingG1 = mUseLineDrawingG1;
         state.mUseLineDrawingUsesG0 = mUseLineDrawingUsesG0;
+        state.mSavedAboutToAutoWrap = mAboutToAutoWrap;
     }
 
     /** DECRS restore cursor - http://www.vt100.net/docs/vt510-rm/DECRC. See {@link #saveCursor()}. */
@@ -2156,6 +2157,9 @@ public final class TerminalEmulator {
         mUseLineDrawingG0 = state.mUseLineDrawingG0;
         mUseLineDrawingG1 = state.mUseLineDrawingG1;
         mUseLineDrawingUsesG0 = state.mUseLineDrawingUsesG0;
+        // Must come after setCursorRowCol because that call clears the flag.
+        // It is only valid while the cursor is still in the last column.
+        mAboutToAutoWrap = state.mSavedAboutToAutoWrap && mCursorCol == mRightMargin - 1;
     }
 
     /** Following a CSI - Control Sequence Introducer, "\033[". {@link #ESC_CSI}. */
@@ -3532,6 +3536,7 @@ public final class TerminalEmulator {
 
         mSavedStateMain.mSavedCursorRow = mSavedStateMain.mSavedCursorCol = mSavedStateMain.mSavedEffect = mSavedStateMain.mSavedDecFlags = 0;
         mSavedStateAlt.mSavedCursorRow = mSavedStateAlt.mSavedCursorCol = mSavedStateAlt.mSavedEffect = mSavedStateAlt.mSavedDecFlags = 0;
+        mSavedStateMain.mSavedAboutToAutoWrap = mSavedStateAlt.mSavedAboutToAutoWrap = false;
         mCurrentDecSetFlags = 0;
         // Initial wrap-around is not accurate but makes terminal more useful, especially on a small screen:
         setDecsetinternalBit(DECSET_BIT_AUTOWRAP, true);
@@ -3587,6 +3592,7 @@ public final class TerminalEmulator {
         int mSavedCursorRow, mSavedCursorCol;
         int mSavedEffect, mSavedForeColor, mSavedBackColor;
         int mSavedDecFlags;
+        boolean mSavedAboutToAutoWrap;
         boolean mUseLineDrawingG0, mUseLineDrawingG1, mUseLineDrawingUsesG0 = true;
     }
 
