@@ -1845,7 +1845,11 @@ public final class TerminalEmulator {
             case 7: // Wrap-around bit, not specific action.
             case 8: // Auto-repeat Keys (DECARM). Do not implement.
             case 9: // X10 mouse reporting - outdated. Do not implement.
-            case 12: // Control cursor blinking - ignore.
+                break;
+            case 12: // Start or stop the blinking cursor, att610.
+                mCursorBlinkRequested = setting;
+                mCursorBlinkState = true;
+                break;
             case 25: // Hide/show cursor - no action needed, renderer will check with shouldCursorBeVisible().
                 if (mClient != null)
                     mClient.onTerminalCursorStateChange(setting);
