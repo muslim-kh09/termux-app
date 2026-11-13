@@ -408,6 +408,9 @@ public final class TerminalEmulator {
      */
     private boolean mCursorBlinkState;
 
+    /** Blink mode requested by DECSCUSR, null when the app has not requested one. */
+    private Boolean mCursorBlinkRequested;
+
     /**
      * Current foreground, background and underline colors. Can either be a color index in [0,259] or a truecolor (24-bit) value.
      * For a 24-bit value the top byte (0xff000000) is set.
@@ -635,11 +638,16 @@ public final class TerminalEmulator {
             mCursorStyle = cursorStyle;
     }
 
+    /** Apply a cursor style requested by DECSCUSR together with its blink mode. */
+    private void applyCursorStyle(int style, boolean blinking) {
+        mCursorStyle = style;
+        mCursorBlinkRequested = blinking;
+        mCursorBlinkState = true;
+    }
+
     public boolean isReverseVideo() {
         return isDecsetInternalBitSet(DECSET_BIT_REVERSE_VIDEO);
     }
-
-
 
     public boolean isCursorEnabled() {
         return isDecsetInternalBitSet(DECSET_BIT_CURSOR_ENABLED);
@@ -648,7 +656,15 @@ public final class TerminalEmulator {
         if (!isCursorEnabled())
             return false;
         else
-            return mCursorBlinkingEnabled ? mCursorBlinkState : true;
+            return isCursorBlinking() ? mCursorBlinkState : true;
+    }
+
+    /**
+     * If the cursor should blink. A blink mode requested by an application with DECSCUSR or
+     * DECSET 12 takes priority over the setting of the user.
+     */
+    public boolean isCursorBlinking() {
+        return mCursorBlinkRequested != null ? mCursorBlinkRequested : mCursorBlinkingEnabled;
     }
 
     public void setCursorBlinkingEnabled(boolean cursorBlinkingEnabled) {
@@ -1095,18 +1111,30 @@ public final class TerminalEmulator {
                         switch (b) {
                             case 'q': // "${CSI}${STYLE} q" - set cursor style (http://www.vt100.net/docs/vt510-rm/DECSCUSR).
                                 switch (arg) {
-                                    case 0: // Blinking block.
-                                    case 1: // Blinking block.
-                                    case 2: // Steady block.
-                                        mCursorStyle = TERMINAL_CURSOR_STYLE_BLOCK;
+                                    case 0: // Back to the default style chosen by the user.
+                                        setCursorStyle();
+                                        mCursorBlinkRequested = null;
+                                        mCursorBlinkState = true;
                                         break;
-                                    case 3: // Blinking underline.
-                                    case 4: // Steady underline.
-                                        mCursorStyle = TERMINAL_CURSOR_STYLE_UNDERLINE;
+                                    case 1:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_BLOCK, true);
                                         break;
-                                    case 5: // Blinking bar (xterm addition).
-                                    case 6: // Steady bar (xterm addition).
-                                        mCursorStyle = TERMINAL_CURSOR_STYLE_BAR;
+                                    case 2:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_BLOCK, false);
+                                        break;
+                                    case 3:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_UNDERLINE, true);
+                                        break;
+                                    case 4:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_UNDERLINE, false);
+                                        break;
+                                    case 5:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_BAR, true);
+                                        break;
+                                    case 6:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_BAR, false);
+                                        break;
+                                    default:
                                         break;
                                 }
                                 break;
@@ -3485,6 +3513,8 @@ public final class TerminalEmulator {
     /** Reset terminal state so user can interact with it regardless of present state. */
     public void reset() {
         setCursorStyle();
+        mCursorBlinkRequested = null;
+        mCursorBlinkState = true;
         mArgIndex = 0;
         mContinueSequence = false;
         mEscapeState = ESC_NONE;
