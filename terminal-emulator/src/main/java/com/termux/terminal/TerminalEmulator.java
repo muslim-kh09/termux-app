@@ -1203,6 +1203,11 @@ public final class TerminalEmulator {
                         // DECSCL, conformance level, http://www.vt100.net/docs/vt510-rm/DECSCL:
                         String csiString = "64;1\"p";
                         mSession.write("\033P1$r" + csiString + "\033\\");
+                    } else if (dcs.equals("$q q")) {
+                        // DECSCUSR, report the cursor style the same way as xterm.
+                        // Values 1 and 2 are block, 3 and 4 underline, 5 and 6 bar, odd values blink.
+                        int cursorStyleCode = mCursorStyle * 2 + (isCursorBlinking() ? 1 : 2);
+                        mSession.write("\033P1$r" + cursorStyleCode + " q\033\\");
                     } else {
                         finishSequenceAndLogError("Unrecognized DECRQSS string: '" + dcs + "'");
                     }
