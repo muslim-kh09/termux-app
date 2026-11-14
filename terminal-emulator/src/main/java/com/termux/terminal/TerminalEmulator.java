@@ -411,6 +411,9 @@ public final class TerminalEmulator {
     /** Blink mode requested by DECSCUSR, null when the app has not requested one. */
     private Boolean mCursorBlinkRequested;
 
+    /** Set when an application chose the cursor style, so a new client must not reset it. */
+    private boolean mCursorStyleRequested;
+
     /**
      * Current foreground, background and underline colors. Can either be a color index in [0,259] or a truecolor (24-bit) value.
      * For a 24-bit value the top byte (0xff000000) is set.
@@ -511,7 +514,8 @@ public final class TerminalEmulator {
 
     public void updateTerminalSessionClient(TerminalSessionClient client) {
         mClient = client;
-        setCursorStyle();
+        // A new client only changes the default, not a style chosen by the application.
+        if (!mCursorStyleRequested) setCursorStyle();
         setCursorBlinkState(true);
     }
 
@@ -641,6 +645,7 @@ public final class TerminalEmulator {
     /** Apply a cursor style requested by DECSCUSR together with its blink mode. */
     private void applyCursorStyle(int style, boolean blinking) {
         mCursorStyle = style;
+        mCursorStyleRequested = true;
         mCursorBlinkRequested = blinking;
         mCursorBlinkState = true;
     }
@@ -1113,6 +1118,7 @@ public final class TerminalEmulator {
                                 switch (arg) {
                                     case 0: // Back to the default style chosen by the user.
                                         setCursorStyle();
+                                        mCursorStyleRequested = false;
                                         mCursorBlinkRequested = null;
                                         mCursorBlinkState = true;
                                         break;
@@ -3529,6 +3535,7 @@ public final class TerminalEmulator {
     public void reset() {
         setCursorStyle();
         mCursorBlinkRequested = null;
+        mCursorStyleRequested = false;
         mCursorBlinkState = true;
         mArgIndex = 0;
         mContinueSequence = false;
