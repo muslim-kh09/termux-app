@@ -1704,7 +1704,7 @@ public final class TerminalEmulator {
 
     private int nextTabStop(int numTabs) {
         for (int i = mCursorCol + 1; i < mColumns; i++)
-            if (mTabStop[i] && --numTabs == 0) return Math.min(i, mRightMargin);
+            if (mTabStop[i] && --numTabs == 0) return Math.min(i, mRightMargin - 1);
         return mRightMargin - 1;
     }
 
@@ -2343,15 +2343,15 @@ public final class TerminalEmulator {
                 break;
             case 'Z': // Cursor Backward Tabulation (CBT). Move the active position n tabs backward.
                 int numberOfTabs = getArg0(1);
-                int newCol = mLeftMargin;
+                int newCol = 0;
                 for (int i = mCursorCol - 1; i >= 0; i--)
                     if (mTabStop[i]) {
                         if (--numberOfTabs == 0) {
-                            newCol = Math.max(i, mLeftMargin);
+                            newCol = i;
                             break;
                         }
                     }
-                mCursorCol = newCol;
+                setCursorCol(newCol);
                 break;
             case '?': // Esc [ ? -- start of a private parameter byte
                 continueSequence(ESC_CSI_QUESTIONMARK);
