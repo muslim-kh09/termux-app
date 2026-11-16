@@ -51,6 +51,8 @@ public final class TerminalColors {
             int charsForColors = c.length() - skipInitial - 2 * skipBetween;
             if (charsForColors % 3 != 0) return 0; // Unequal lengths.
             int componentLength = charsForColors / 3;
+            // Each component has one to four hex digits.
+            if (componentLength < 1 || componentLength > 4) return 0;
             double mult = 255 / (Math.pow(2, componentLength * 4) - 1);
 
             int currentPosition = skipInitial;
@@ -60,9 +62,18 @@ public final class TerminalColors {
             currentPosition += componentLength + skipBetween;
             String bString = c.substring(currentPosition, currentPosition + componentLength);
 
-            int r = (int) (Integer.parseInt(rString, 16) * mult);
-            int g = (int) (Integer.parseInt(gString, 16) * mult);
-            int b = (int) (Integer.parseInt(bString, 16) * mult);
+            int r, g, b;
+            if (skipBetween == 0) {
+                // The hash form keeps the most significant bits, so the digits are left justified.
+                int shift = 4 * (4 - componentLength);
+                r = ((Integer.parseInt(rString, 16) << shift) >> 8) & 0xFF;
+                g = ((Integer.parseInt(gString, 16) << shift) >> 8) & 0xFF;
+                b = ((Integer.parseInt(bString, 16) << shift) >> 8) & 0xFF;
+            } else {
+                r = (int) (Integer.parseInt(rString, 16) * mult);
+                g = (int) (Integer.parseInt(gString, 16) * mult);
+                b = (int) (Integer.parseInt(bString, 16) * mult);
+            }
             return 0xFF << 24 | r << 16 | g << 8 | b;
         } catch (NumberFormatException | IndexOutOfBoundsException e) {
             return 0;
