@@ -1157,6 +1157,15 @@ public final class TerminalEmulator {
                         if (b == 'x' && (attributeChangeExtent >= 0 && attributeChangeExtent <= 2)) {
                             // Select attribute change extent (DECSACE - http://www.vt100.net/docs/vt510-rm/DECSACE).
                             setDecsetinternalBit(DECSET_BIT_RECTANGULAR_CHANGEATTRIBUTE, attributeChangeExtent == 2);
+                        } else if (b == 'y') {
+                            // Request checksum of rectangular area, DECRQCRA. The page argument is ignored.
+                            int rqTop = Math.max(1, getArg(2, 1, true));
+                            int rqLeft = Math.max(1, getArg(3, 1, true));
+                            int rqBottom = Math.min(mRows, getArg(4, mRows, true));
+                            int rqRight = Math.min(mColumns, getArg(5, mColumns, true));
+                            int rqSum = sumOfCellsInRect(rqTop - 1, rqLeft - 1, rqBottom, rqRight);
+                            // The reply is the negated 16 bit sum, as on DEC terminals.
+                            mSession.write(String.format(Locale.US, "\033P%d!~%04X\033\\", getArg(0, 0, false), (0x10000 - (rqSum & 0xFFFF)) & 0xFFFF));
                         } else {
                             unknownSequence(b);
                         }
@@ -3530,6 +3539,27 @@ public final class TerminalEmulator {
     /** Columns left of the origin, which is not zero only in origin mode. */
     private int originColOffset() {
         return isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE) ? mLeftMargin : 0;
+    }
+
+    /**
+     * Sum of the code points of the cells in a rectangle, as DECRQCRA reports it.
+     * Rows and columns are zero based and the end bounds are exclusive.
+     */
+    private int sumOfCellsInRect(int top, int left, int bottom, int right) {
+        int sum = 0;
+        for (int row = top; row < bottom; row++) {
+            TerminalRow line = mScreen.allocateFullLineIfNecessary(mScreen.externalToInternalRow(row));
+            for (int col = left; col < right; col++) {
+                int start = line.findStartOfColumn(col);
+                int end = (col + 1 < mColumns) ? line.findStartOfColumn(col + 1) : line.getSpaceUsed();
+                for (int i = start; i < end; ) {
+                    int codePoint = Character.codePointAt(line.mText, i);
+                    sum += codePoint;
+                    i += Character.charCount(codePoint);
+                }
+            }
+        }
+        return sum;
     }
 
     private void setCursorRow(int row) {
