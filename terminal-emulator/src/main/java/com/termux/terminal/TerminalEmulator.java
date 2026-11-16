@@ -2208,10 +2208,10 @@ public final class TerminalEmulator {
             }
             break;
             case 'A': // "CSI${n}A" - Cursor up (CUU) ${n} rows.
-                setCursorRow(Math.max(0, mCursorRow - getArg0(1)));
+                moveCursorUp(getArg0(1));
                 break;
             case 'B': // "CSI${n}B" - Cursor down (CUD) ${n} rows.
-                setCursorRow(Math.min(mRows - 1, mCursorRow + getArg0(1)));
+                moveCursorDown(getArg0(1));
                 break;
             case 'C': // "CSI${n}C" - Cursor forward (CUF).
             case 'a': // "CSI${n}a" - Horizontal position relative (HPR). From ISO-6428/ECMA-48.
@@ -3493,6 +3493,18 @@ public final class TerminalEmulator {
         int g = (65535 * ((rgb >> 8) & 0xFF)) / 255;
         int b = (65535 * (rgb & 0xFF)) / 255;
         return String.format(Locale.US, "rgb:%04x/%04x/%04x", r, g, b);
+    }
+
+    /** Move up, stopping at the top margin when the cursor starts inside the scroll region. */
+    private void moveCursorUp(int rows) {
+        int limit = mCursorRow >= mTopMargin ? mTopMargin : 0;
+        setCursorRow(Math.max(limit, mCursorRow - rows));
+    }
+
+    /** Move down, stopping at the bottom margin when the cursor starts inside the scroll region. */
+    private void moveCursorDown(int rows) {
+        int limit = mCursorRow < mBottomMargin ? mBottomMargin - 1 : mRows - 1;
+        setCursorRow(Math.min(limit, mCursorRow + rows));
     }
 
     private void setCursorRow(int row) {
