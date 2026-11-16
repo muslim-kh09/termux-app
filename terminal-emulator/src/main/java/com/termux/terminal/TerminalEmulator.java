@@ -855,7 +855,7 @@ public final class TerminalEmulator {
                 if (!
                     (mEscapeState == ESC_DCS ||
                     ((mEscapeState == ESC_OSC || mEscapeState == ESC_OSC__ESC) && mIgnoreCrLfForOsc))) {
-                    setCursorCol(mLeftMargin);
+                    carriageReturn();
                 }
                 break;
             case 14: // Shift Out (Ctrl-N, SO) → Switch to Alternate Character Set. This invokes the G1 character set.
@@ -2223,10 +2223,12 @@ public final class TerminalEmulator {
                 setCursorCol(Math.max(mCursorCol >= mLeftMargin ? mLeftMargin : 0, mCursorCol - getArg0(1)));
                 break;
             case 'E': // "CSI{n}E - Cursor Next Line (CNL). From ISO-6428/ECMA-48.
-                setCursorPosition(0, mCursorRow + getArg0(1));
+                moveCursorDown(getArg0(1));
+                carriageReturn();
                 break;
             case 'F': // "CSI{n}F - Cursor Previous Line (CPL). From ISO-6428/ECMA-48.
-                setCursorPosition(0, mCursorRow - getArg0(1));
+                moveCursorUp(getArg0(1));
+                carriageReturn();
                 break;
             case 'G': // "CSI${n}G" - Cursor horizontal absolute (CHA) to column ${n}.
                 setCursorCol(Math.min(Math.max(1, getArg0(1)), mColumns) - 1);
@@ -3507,6 +3509,12 @@ public final class TerminalEmulator {
     private void moveCursorDown(int rows) {
         int limit = mCursorRow < mBottomMargin ? mBottomMargin - 1 : mRows - 1;
         setCursorRow(Math.min(limit, mCursorRow + rows));
+    }
+
+    /** Go to the left margin, or to the screen edge when left of the margin and origin mode is off. */
+    private void carriageReturn() {
+        boolean originMode = isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE);
+        setCursorCol(originMode || mCursorCol >= mLeftMargin ? mLeftMargin : 0);
     }
 
     private void setCursorRow(int row) {
