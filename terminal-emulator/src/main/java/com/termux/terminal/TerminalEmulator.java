@@ -828,7 +828,7 @@ public final class TerminalEmulator {
                         setCursorRowCol(previousRow, mRightMargin - 1);
                     }
                 } else {
-                    setCursorCol(mCursorCol - 1);
+                    setCursorCol(Math.max(0, mCursorCol - 1));
                 }
                 break;
             case 9: // Horizontal tab (HT, \t) - move to next tab stop, but not past edge of screen
