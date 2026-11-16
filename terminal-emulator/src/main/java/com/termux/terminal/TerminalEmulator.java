@@ -2215,10 +2215,12 @@ public final class TerminalEmulator {
                 break;
             case 'C': // "CSI${n}C" - Cursor forward (CUF).
             case 'a': // "CSI${n}a" - Horizontal position relative (HPR). From ISO-6428/ECMA-48.
-                setCursorCol(Math.min(mRightMargin - 1, mCursorCol + getArg0(1)));
+                // Stop at the right margin when starting inside the margins, otherwise at the screen edge.
+                setCursorCol(Math.min(mCursorCol < mRightMargin ? mRightMargin - 1 : mColumns - 1, mCursorCol + getArg0(1)));
                 break;
             case 'D': // "CSI${n}D" - Cursor backward (CUB) ${n} columns.
-                setCursorCol(Math.max(mLeftMargin, mCursorCol - getArg0(1)));
+                // Stop at the left margin when starting inside the margins, otherwise at the screen edge.
+                setCursorCol(Math.max(mCursorCol >= mLeftMargin ? mLeftMargin : 0, mCursorCol - getArg0(1)));
                 break;
             case 'E': // "CSI{n}E - Cursor Next Line (CNL). From ISO-6428/ECMA-48.
                 setCursorPosition(0, mCursorRow + getArg0(1));
