@@ -2231,7 +2231,12 @@ public final class TerminalEmulator {
                 carriageReturn();
                 break;
             case 'G': // "CSI${n}G" - Cursor horizontal absolute (CHA) to column ${n}.
-                setCursorCol(Math.min(Math.max(1, getArg0(1)), mColumns) - 1);
+                // In origin mode the column is relative to the left margin and cannot leave the margins.
+                if (isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE)) {
+                    setCursorCol(Math.min(mLeftMargin + getArg0(1) - 1, mRightMargin - 1));
+                } else {
+                    setCursorCol(Math.min(Math.max(1, getArg0(1)), mColumns) - 1);
+                }
                 break;
             case 'H': // "${CSI}${ROW};${COLUMN}H" - Cursor position (CUP).
             case 'f': // "${CSI}${ROW};${COLUMN}f" - Horizontal and Vertical Position (HVP).
