@@ -1792,7 +1792,7 @@ public final class TerminalEmulator {
                 switch (getArg0(-1)) {
                     case 6:
                         // Extended Cursor Position (DECXCPR - http://www.vt100.net/docs/vt510-rm/DECXCPR). Page=1.
-                        mSession.write(String.format(Locale.US, "\033[?%d;%d;1R", mCursorRow + 1, mCursorCol + 1));
+                        mSession.write(String.format(Locale.US, "\033[?%d;%d;1R", mCursorRow + 1 - originRowOffset(), mCursorCol + 1 - originColOffset()));
                         break;
                     default:
                         finishSequence();
@@ -2424,7 +2424,7 @@ public final class TerminalEmulator {
                     case 6: // Cursor position report (CPR):
                         // Answer is ESC [ y ; x R, where x,y is
                         // the cursor location.
-                        mSession.write(String.format(Locale.US, "\033[%d;%dR", mCursorRow + 1, mCursorCol + 1));
+                        mSession.write(String.format(Locale.US, "\033[%d;%dR", mCursorRow + 1 - originRowOffset(), mCursorCol + 1 - originColOffset()));
                         break;
                     default:
                         break;
@@ -3520,6 +3520,16 @@ public final class TerminalEmulator {
     private void carriageReturn() {
         boolean originMode = isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE);
         setCursorCol(originMode || mCursorCol >= mLeftMargin ? mLeftMargin : 0);
+    }
+
+    /** Rows above the origin, which is not zero only in origin mode. */
+    private int originRowOffset() {
+        return isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE) ? mTopMargin : 0;
+    }
+
+    /** Columns left of the origin, which is not zero only in origin mode. */
+    private int originColOffset() {
+        return isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE) ? mLeftMargin : 0;
     }
 
     private void setCursorRow(int row) {
