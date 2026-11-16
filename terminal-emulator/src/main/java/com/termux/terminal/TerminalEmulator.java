@@ -2847,8 +2847,13 @@ public final class TerminalEmulator {
                                 unknownSequence(b);
                                 return;
                             } else {
-                                mColors.tryParseColor(colorIndex, textParameter.substring(parsingPairStart, i));
-                                mSession.onColorsChanged();
+                                String pairSpec = textParameter.substring(parsingPairStart, i);
+                                if ("?".equals(pairSpec)) {
+                                    mSession.write("\033]4;" + colorIndex + ";" + formatColorReport(mColors.mCurrentColors[colorIndex]) + bellOrStringTerminator);
+                                } else {
+                                    mColors.tryParseColor(colorIndex, pairSpec);
+                                    mSession.onColorsChanged();
+                                }
                                 colorIndex = -1;
                                 parsingPairStart = -1;
                             }
@@ -3480,6 +3485,14 @@ public final class TerminalEmulator {
             mAboutToAutoWrap = (mCursorCol == mRightMargin - displayWidth);
 
         mCursorCol = Math.min(mCursorCol + displayWidth, mRightMargin - 1);
+    }
+
+    /** Format a color as the 16 bit per channel text used in xterm color reports. */
+    private static String formatColorReport(int rgb) {
+        int r = (65535 * ((rgb >> 16) & 0xFF)) / 255;
+        int g = (65535 * ((rgb >> 8) & 0xFF)) / 255;
+        int b = (65535 * (rgb & 0xFF)) / 255;
+        return String.format(Locale.US, "rgb:%04x/%04x/%04x", r, g, b);
     }
 
     private void setCursorRow(int row) {
