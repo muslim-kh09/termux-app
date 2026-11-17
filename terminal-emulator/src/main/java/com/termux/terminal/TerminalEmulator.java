@@ -210,6 +210,10 @@ public final class TerminalEmulator {
     private static final int DECSET_BIT_LEFTRIGHT_MARGIN_MODE = 1 << 11;
     /** Not really DECSET bit... - http://www.vt100.net/docs/vt510-rm/DECSACE */
     private static final int DECSET_BIT_RECTANGULAR_CHANGEATTRIBUTE = 1 << 12;
+    /** DECSET 45, reverse wrap-around to lines that were wrapped. */
+    private static final int DECSET_BIT_REVERSE_WRAP = 1 << 13;
+    /** DECSET 1045, reverse wrap-around to any line, and from the top margin to the bottom margin. */
+    private static final int DECSET_BIT_REVERSE_WRAP_EXTENDED = 1 << 14;
 
 
     private String mTitle;
@@ -483,6 +487,10 @@ public final class TerminalEmulator {
                 return DECSET_BIT_APPLICATION_KEYPAD;
             case 69:
                 return DECSET_BIT_LEFTRIGHT_MARGIN_MODE;
+            case 45:
+                return DECSET_BIT_REVERSE_WRAP;
+            case 1045:
+                return DECSET_BIT_REVERSE_WRAP_EXTENDED;
             case 1000:
                 return DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE;
             case 1002:
@@ -820,16 +828,7 @@ public final class TerminalEmulator {
                     mSession.onBell();
                 break;
             case 8: // Backspace (BS, ^H).
-                if (mLeftMargin == mCursorCol) {
-                    // Jump to previous line if it was auto-wrapped.
-                    int previousRow = mCursorRow - 1;
-                    if (previousRow >= 0 && mScreen.getLineWrap(previousRow)) {
-                        mScreen.clearLineWrap(previousRow);
-                        setCursorRowCol(previousRow, mRightMargin - 1);
-                    }
-                } else {
-                    setCursorCol(Math.max(0, mCursorCol - 1));
-                }
+                cursorBack(1);
                 break;
             case 9: // Horizontal tab (HT, \t) - move to next tab stop, but not past edge of screen
                 // XXX: Should perhaps use color if writing to new cells. Try with
@@ -1875,7 +1874,8 @@ public final class TerminalEmulator {
                     mClient.onTerminalCursorStateChange(setting);
                 break;
             case 40: // Allow 80 => 132 Mode, ignore.
-            case 45: // TODO: Reverse wrap-around. Implement???
+            case 45: // Reverse wrap-around, the mapped bit is enough.
+            case 1045: // Extended reverse wrap-around, the mapped bit is enough.
             case 66: // Application keypad (DECNKM).
                 break;
             case 69: // Left and right margin mode (DECLRMM).
@@ -2228,8 +2228,7 @@ public final class TerminalEmulator {
                 setCursorCol(Math.min(mCursorCol < mRightMargin ? mRightMargin - 1 : mColumns - 1, mCursorCol + getArg0(1)));
                 break;
             case 'D': // "CSI${n}D" - Cursor backward (CUB) ${n} columns.
-                // Stop at the left margin when starting inside the margins, otherwise at the screen edge.
-                setCursorCol(Math.max(mCursorCol >= mLeftMargin ? mLeftMargin : 0, mCursorCol - getArg0(1)));
+                cursorBack(getArg0(1));
                 break;
             case 'E': // "CSI{n}E - Cursor Next Line (CNL). From ISO-6428/ECMA-48.
                 moveCursorDown(getArg0(1));
@@ -3560,6 +3559,71 @@ public final class TerminalEmulator {
             }
         }
         return sum;
+    }
+
+    /**
+     * Move the cursor backward the way xterm does, see CursorBack in xterm cursor.c.
+     * Reverse wrap-around needs autowrap. Mode 45 wraps only to lines that were wrapped,
+     * mode 1045 wraps to any line, and from the top margin to the bottom margin.
+     */
+    private void cursorBack(int n) {
+        boolean autoWrap = isDecsetInternalBitSet(DECSET_BIT_AUTOWRAP);
+        boolean rev = autoWrap && isDecsetInternalBitSet(DECSET_BIT_REVERSE_WRAP);
+        boolean rev2 = autoWrap && isDecsetInternalBitSet(DECSET_BIT_REVERSE_WRAP_EXTENDED);
+        int left = mLeftMargin;
+        int right = mRightMargin - 1;
+        int top = mTopMargin;
+        int bottom = mBottomMargin - 1;
+        int col = mCursorCol;
+        int row = mCursorRow;
+        // A cursor that is already left of the left margin may go to the screen edge.
+        if (mCursorCol < left) left = 0;
+
+        boolean lineChecked = false;
+        int count = n;
+        if (count > 0) {
+            if ((rev || rev2) && mAboutToAutoWrap) {
+                // The cursor is in the pending wrap position, so the first step only cancels it.
+                count--;
+            } else {
+                col--;
+            }
+        }
+
+        for (;;) {
+            if (col < left) {
+                if (rev2) {
+                    col = right;
+                    if (row == top) row = bottom + 1;
+                } else if (!rev) {
+                    col = left;
+                    break;
+                }
+                lineChecked = false;
+                row--;
+            }
+            if (!lineChecked) {
+                lineChecked = true;
+                if (row < 0) {
+                    // Nothing above the first row to wrap to.
+                    row = 0;
+                    col = left;
+                    break;
+                }
+                if (row != mCursorRow) {
+                    if (!rev2 && !mScreen.getLineWrap(row)) {
+                        // The reverse wrap failed because the line above was not wrapped.
+                        if (row < bottom) row++;
+                        col = left;
+                        break;
+                    }
+                    col = right;
+                }
+            }
+            if (--count <= 0) break;
+            col--;
+        }
+        setCursorRowCol(row, col);
     }
 
     private void setCursorRow(int row) {
