@@ -2391,10 +2391,11 @@ public final class TerminalEmulator {
                 if (getArg0(0) == 0) mSession.write("\033[?64;1;2;4;6;9;15;18;21;22c");
                 break;
             case 'd': // ESC [ Pn d - Vert Position Absolute
-                setCursorRow(Math.min(Math.max(1, getArg0(1)), mRows) - 1);
+                // Relative to the margins in origin mode, like CUP.
+                setCursorPosition(mCursorCol - originColOffset(), Math.max(1, getArg0(1)) - 1);
                 break;
             case 'e': // Vertical Position Relative (VPR). From ISO-6429 (ECMA-48).
-                setCursorPosition(mCursorCol, mCursorRow + getArg0(1));
+                setCursorPosition(mCursorCol - originColOffset(), mCursorRow - originRowOffset() + getArg0(1));
                 break;
             // case 'f': "${CSI}${ROW};${COLUMN}f" - Horizontal and Vertical Position (HVP). Grouped with case 'H'.
             case 'g': // Clear tab stop
