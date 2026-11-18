@@ -2105,7 +2105,10 @@ public final class TerminalEmulator {
                 continueSequence(ESC_SELECT_RIGHT_PAREN);
                 break;
             case '6': // Back index (http://www.vt100.net/docs/vt510-rm/DECBI). Move left, insert blank column if start.
-                if (mCursorCol > mLeftMargin) {
+                if (mCursorCol < mLeftMargin || mCursorCol >= mRightMargin) {
+                    // Outside the margins this is a plain cursor move.
+                    setCursorCol(Math.max(0, mCursorCol - 1));
+                } else if (mCursorCol > mLeftMargin) {
                     mCursorCol--;
                 } else {
                     int rows = mBottomMargin - mTopMargin;
@@ -2120,7 +2123,9 @@ public final class TerminalEmulator {
                 restoreCursor();
                 break;
             case '9': // Forward Index (http://www.vt100.net/docs/vt510-rm/DECFI). Move right, insert blank column if end.
-                if (mCursorCol < mRightMargin - 1) {
+                if (mCursorCol < mLeftMargin || mCursorCol >= mRightMargin) {
+                    setCursorCol(Math.min(mColumns - 1, mCursorCol + 1));
+                } else if (mCursorCol < mRightMargin - 1) {
                     mCursorCol++;
                 } else {
                     int rows = mBottomMargin - mTopMargin;
