@@ -1110,6 +1110,10 @@ public final class TerminalEmulator {
                             if (mode == 47 || mode == 1047 || mode == 1049) {
                                 // This state is carried by mScreen pointer.
                                 value = (mScreen == mAltBuffer) ? 1 : 2;
+                            } else if (mode == 12) {
+                                // DECSET 12 (att610) - start/stop blinking cursor.
+                                // Supported for set/reset and must also be queryable via DECRQM, matching xterm.
+                                value = isCursorBlinking() ? 1 : 2;
                             } else {
                                 int internalBit = mapDecSetBitToInternalBit(mode);
                                 if (internalBit != -1) {
