@@ -1784,7 +1784,9 @@ public final class TerminalEmulator {
                 }
                 long style = getStyle();
                 for (int row = startRow; row < endRow; row++) {
-                    for (int col = startCol; col < endCol; col++) {
+                    int firstCol = row == mCursorRow ? startCol : 0;
+                    int lastCol = row == mCursorRow ? endCol : mColumns;
+                    for (int col = firstCol; col < lastCol; col++) {
                         if ((TextStyle.decodeEffect(mScreen.getStyleAt(row, col)) & TextStyle.CHARACTER_ATTRIBUTE_PROTECTED) == 0)
                             mScreen.setChar(col, row, fillChar, style);
                     }
