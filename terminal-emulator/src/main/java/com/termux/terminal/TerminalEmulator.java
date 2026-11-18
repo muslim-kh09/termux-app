@@ -2062,7 +2062,8 @@ public final class TerminalEmulator {
             }
         } else {
             if (newCursorRow == mBottomMargin) {
-                scrollDownOneLine();
+                // Outside the left and right margins the cursor stops at the bottom margin instead of scrolling.
+                if (mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) scrollDownOneLine();
                 newCursorRow = mBottomMargin - 1;
             }
             setCursorRow(newCursorRow);
@@ -2149,11 +2150,12 @@ public final class TerminalEmulator {
             case 'M': // "${ESC}M" - reverse index (RI).
                 // http://www.vt100.net/docs/vt100-ug/chapter3.html: "Move the active position to the same horizontal
                 // position on the preceding line. If the active position is at the top margin, a scroll down is performed".
-                if (mCursorRow <= mTopMargin) {
+                if (mCursorRow == mTopMargin && mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
                     mScreen.blockCopy(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin, mBottomMargin - (mTopMargin + 1), mLeftMargin, mTopMargin + 1);
                     blockClear(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin);
                 } else {
-                    mCursorRow--;
+                    // Above the top margin the cursor can go up to the first row, otherwise it stops at the top margin.
+                    setCursorRow(Math.max(mCursorRow >= mTopMargin ? mTopMargin : 0, mCursorRow - 1));
                 }
                 break;
             case 'N': // SS2, ignore.
