@@ -2077,7 +2077,13 @@ public final class TerminalEmulator {
     private void doEscPound(int b) {
         switch (b) {
             case '8': // Esc # 8 - DEC screen alignment test - fill screen with E's.
+                // xterm also clears origin mode, resets the margins and homes the cursor.
+                setDecsetinternalBit(DECSET_BIT_ORIGIN_MODE, false);
+                mLeftMargin = mTopMargin = 0;
+                mBottomMargin = mRows;
+                mRightMargin = mColumns;
                 mScreen.blockSet(0, 0, mColumns, mRows, 'E', getStyle());
+                setCursorPosition(0, 0);
                 break;
             default:
                 unknownSequence(b);
