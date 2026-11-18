@@ -1222,7 +1222,15 @@ public final class TerminalEmulator {
                         // Values 1 and 2 are block, 3 and 4 underline, 5 and 6 bar, odd values blink.
                         int cursorStyleCode = mCursorStyle * 2 + (isCursorBlinking() ? 1 : 2);
                         mSession.write("\033P1$r" + cursorStyleCode + " q\033\\");
+                    } else if (dcs.equals("$qr")) {
+                        // DECSTBM, top and bottom margins.
+                        mSession.write("\033P1$r" + (mTopMargin + 1) + ";" + mBottomMargin + "r\033\\");
+                    } else if (dcs.equals("$qs")) {
+                        // DECSLRM, left and right margins.
+                        mSession.write("\033P1$r" + (mLeftMargin + 1) + ";" + mRightMargin + "s\033\\");
                     } else {
+                        // An invalid request gets the answer DCS 0 $ r ST.
+                        mSession.write("\033P0$r\033\\");
                         finishSequenceAndLogError("Unrecognized DECRQSS string: '" + dcs + "'");
                     }
                 } else if (dcs.startsWith("+q")) {
