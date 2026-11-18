@@ -932,6 +932,16 @@ public final class TerminalEmulator {
                         int effectiveLeftMargin = originMode ? mLeftMargin : 0;
                         int effectiveRightMargin = originMode ? mRightMargin : mColumns;
                         switch (b) {
+                            case 'p': {
+                                // Request ANSI mode, DECRQM. 1 is set, 2 is reset, 0 is not recognized.
+                                int ansiMode = getArg0(0);
+                                int ansiValue;
+                                if (ansiMode == 4) ansiValue = mInsertMode ? 1 : 2;
+                                else if (ansiMode == 20) ansiValue = mLinefeedMode ? 1 : 2;
+                                else ansiValue = 0;
+                                mSession.write(String.format(Locale.US, "\033[%d;%d$y", ansiMode, ansiValue));
+                                break;
+                            }
                             case 'v': // ${CSI}${SRC_TOP}${SRC_LEFT}${SRC_BOTTOM}${SRC_RIGHT}${SRC_PAGE}${DST_TOP}${DST_LEFT}${DST_PAGE}$v"
                                 // Copy rectangular area (DECCRA - http://vt100.net/docs/vt510-rm/DECCRA):
                                 // "If Pbs is greater than Pts, or Pls is greater than Prs, the terminal ignores DECCRA.
