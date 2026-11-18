@@ -2449,12 +2449,16 @@ public final class TerminalEmulator {
                 // The escape sequence numbers bottom 2..24, and so do we (because we use a zero based numbering
                 // scheme, but we store the first line below the bottom-most scrolling line.
                 // As a result, we adjust the top line by -1, but we leave the bottom line alone.
-                // Also require that top + 2 <= bottom.
-                mTopMargin = Math.max(0, Math.min(getArg0(1) - 1, mRows - 2));
-                mBottomMargin = Math.max(mTopMargin + 2, Math.min(getArg1(mRows), mRows));
+                // A request with the bottom not below the top is ignored completely.
+                int requestedTop = getArg0(1);
+                int requestedBottom = Math.min(getArg1(mRows), mRows);
+                if (requestedBottom > requestedTop) {
+                    mTopMargin = requestedTop - 1;
+                    mBottomMargin = requestedBottom;
 
-                // DECSTBM moves the cursor to column 1, line 1 of the page respecting origin mode.
-                setCursorPosition(0, 0);
+                    // DECSTBM moves the cursor to column 1, line 1 of the page respecting origin mode.
+                    setCursorPosition(0, 0);
+                }
             }
             break;
             case 's':
