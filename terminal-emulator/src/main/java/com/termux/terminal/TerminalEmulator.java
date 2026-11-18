@@ -2144,6 +2144,8 @@ public final class TerminalEmulator {
             case '>': // DECKPNM
                 setDecsetinternalBit(DECSET_BIT_APPLICATION_KEYPAD, false);
                 break;
+            case '^': // PM - Privacy Message. The string is ignored like APC.
+            case 'X': // SOS - Start Of String. The string is ignored like APC.
             case '_': // APC - Application Program Command.
                 clearTerminalControlArgs();
                 continueSequence(ESC_APC);
