@@ -383,6 +383,9 @@ public final class TerminalEmulator {
      */
     private boolean mInsertMode;
 
+    /** Linefeed mode LNM, where LF, VT and FF also move the cursor to the left margin. */
+    private boolean mLinefeedMode;
+
     /** An array of tab stops. mTabStop[i] is true if there is a tab stop set for column i. */
     private boolean[] mTabStop;
 
@@ -848,6 +851,7 @@ public final class TerminalEmulator {
                     (mEscapeState == ESC_DCS ||
                     ((mEscapeState == ESC_OSC || mEscapeState == ESC_OSC__ESC) && mIgnoreCrLfForOsc))) {
                     doLinefeed();
+                    if (mLinefeedMode) carriageReturn();
                 }
                 break;
             case 13: // Carriage return (CR, \r).
@@ -3121,9 +3125,9 @@ public final class TerminalEmulator {
             case 4: // Set="Insert Mode". Reset="Replace Mode". (IRM).
                 mInsertMode = newValue;
                 break;
-            case 20: // Normal Linefeed (LNM).
-                unknownParameter(modeBit);
+            case 20: // Set is New Line, reset is Normal Linefeed, LNM.
                 // http://www.vt100.net/docs/vt510-rm/LNM
+                mLinefeedMode = newValue;
                 break;
             case 34:
                 // Normal cursor visibility - when using TERM=screen, see
@@ -3702,6 +3706,7 @@ public final class TerminalEmulator {
         mContinueSequence = false;
         mEscapeState = ESC_NONE;
         mInsertMode = false;
+        mLinefeedMode = false;
         mTopMargin = mLeftMargin = 0;
         mBottomMargin = mRows;
         mRightMargin = mColumns;
