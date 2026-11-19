@@ -29,7 +29,8 @@ final class ByteQueue {
                 return 0;
             }
         }
-        if (!mOpen) return -1;
+        // Only report the end once the data queued before the close has been read.
+        if (!mOpen && mStoredBytes == 0) return -1;
 
         int totalRead = 0;
         int bufferLength = mBuffer.length;
