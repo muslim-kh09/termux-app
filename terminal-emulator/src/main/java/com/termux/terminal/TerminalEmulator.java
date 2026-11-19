@@ -1952,6 +1952,8 @@ public final class TerminalEmulator {
                     boolean resized = !(newScreen.mColumns == mColumns && newScreen.mScreenRows == mRows);
                     // Modes 47 and 1047 leave the cursor alone, like xterm.
                     if (setting && externalBit == 1049) saveCursor();
+                    // Mode 1047 clears the alternate screen when it is left.
+                    if (!setting && externalBit == 1047) mScreen.blockSet(0, 0, mColumns, mRows, ' ', getStyle());
                     mScreen = newScreen;
                     if (!setting && externalBit == 1049) {
                         int col = mSavedStateMain.mSavedCursorCol;
@@ -1966,7 +1968,8 @@ public final class TerminalEmulator {
                     // Check if buffer size needs to be updated:
                     if (resized) resizeScreen();
                     // Clear new screen if alt buffer:
-                    if (newScreen == mAltBuffer)
+                    // Mode 47 keeps whatever the alternate screen held before.
+                    if (newScreen == mAltBuffer && externalBit != 47)
                         newScreen.blockSet(0, 0, mColumns, mRows, ' ', getStyle());
                 }
                 break;
