@@ -1076,17 +1076,25 @@ public final class TerminalEmulator {
                         }
                         break;
                     case ESC_CSI_SINGLE_QUOTE:
+                        boolean inMargins = mCursorRow >= mTopMargin && mCursorRow < mBottomMargin
+                            && mCursorCol >= mLeftMargin && mCursorCol < mRightMargin;
+                        int regionRows = mBottomMargin - mTopMargin;
                         if (b == '}') { // Insert Ps Column(s) (default = 1) (DECIC), VT420 and up.
-                            int columnsAfterCursor = mRightMargin - mCursorCol;
-                            int columnsToInsert = Math.min(getArg0(1), columnsAfterCursor);
-                            int columnsToMove = columnsAfterCursor - columnsToInsert;
-                            mScreen.blockCopy(mCursorCol, 0, columnsToMove, mRows, mCursorCol + columnsToInsert, 0);
-                            blockClear(mCursorCol, 0, columnsToInsert, mRows);
+                            if (inMargins) {
+                                int columnsAfterCursor = mRightMargin - mCursorCol;
+                                int columnsToInsert = Math.min(getArg0(1), columnsAfterCursor);
+                                int columnsToMove = columnsAfterCursor - columnsToInsert;
+                                mScreen.blockCopy(mCursorCol, mTopMargin, columnsToMove, regionRows, mCursorCol + columnsToInsert, mTopMargin);
+                                blockClear(mCursorCol, mTopMargin, columnsToInsert, regionRows);
+                            }
                         } else if (b == '~') { // Delete Ps Column(s) (default = 1) (DECDC), VT420 and up.
-                            int columnsAfterCursor = mRightMargin - mCursorCol;
-                            int columnsToDelete = Math.min(getArg0(1), columnsAfterCursor);
-                            int columnsToMove = columnsAfterCursor - columnsToDelete;
-                            mScreen.blockCopy(mCursorCol + columnsToDelete, 0, columnsToMove, mRows, mCursorCol, 0);
+                            if (inMargins) {
+                                int columnsAfterCursor = mRightMargin - mCursorCol;
+                                int columnsToDelete = Math.min(getArg0(1), columnsAfterCursor);
+                                int columnsToMove = columnsAfterCursor - columnsToDelete;
+                                mScreen.blockCopy(mCursorCol + columnsToDelete, mTopMargin, columnsToMove, regionRows, mCursorCol, mTopMargin);
+                                blockClear(mCursorCol + columnsToMove, mTopMargin, columnsToDelete, regionRows);
+                            }
                         } else {
                             unknownSequence(b);
                         }
