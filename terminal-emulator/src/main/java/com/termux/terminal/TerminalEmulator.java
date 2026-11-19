@@ -3761,6 +3761,7 @@ public final class TerminalEmulator {
         mEscapeState = ESC_NONE;
         mInsertMode = false;
         mLinefeedMode = false;
+        mEffect = 0;
         mTopMargin = mLeftMargin = 0;
         mBottomMargin = mRows;
         mRightMargin = mColumns;
