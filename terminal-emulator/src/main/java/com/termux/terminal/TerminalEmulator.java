@@ -2151,8 +2151,9 @@ public final class TerminalEmulator {
                 doLinefeed();
                 break;
             case 'E': // Next line (http://www.vt100.net/docs/vt510-rm/NEL).
-                setCursorCol(isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE) ? mLeftMargin : 0);
+                // The old column decides about scrolling, so move down first.
                 doLinefeed();
+                carriageReturn();
                 break;
             case 'F': // Cursor to lower-left corner of screen
                 setCursorRowCol(0, mBottomMargin - 1);
