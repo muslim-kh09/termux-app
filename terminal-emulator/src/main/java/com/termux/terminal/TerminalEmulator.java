@@ -1184,10 +1184,16 @@ public final class TerminalEmulator {
                             setDecsetinternalBit(DECSET_BIT_RECTANGULAR_CHANGEATTRIBUTE, attributeChangeExtent == 2);
                         } else if (b == 'y') {
                             // Request checksum of rectangular area, DECRQCRA. The page argument is ignored.
-                            int rqTop = Math.max(1, getArg(2, 1, true));
-                            int rqLeft = Math.max(1, getArg(3, 1, true));
-                            int rqBottom = Math.min(mRows, getArg(4, mRows, true));
-                            int rqRight = Math.min(mColumns, getArg(5, mColumns, true));
+                            // Coordinates are relative to the margins in origin mode, like CUP.
+                            boolean rqOrigin = isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE);
+                            int rqRowOffset = originRowOffset();
+                            int rqColOffset = originColOffset();
+                            int rqMaxRow = rqOrigin ? mBottomMargin : mRows;
+                            int rqMaxCol = rqOrigin ? mRightMargin : mColumns;
+                            int rqTop = rqRowOffset + Math.max(1, getArg(2, 1, true));
+                            int rqLeft = rqColOffset + Math.max(1, getArg(3, 1, true));
+                            int rqBottom = Math.min(rqMaxRow, rqRowOffset + getArg(4, rqMaxRow - rqRowOffset, true));
+                            int rqRight = Math.min(rqMaxCol, rqColOffset + getArg(5, rqMaxCol - rqColOffset, true));
                             int rqSum = sumOfCellsInRect(rqTop - 1, rqLeft - 1, rqBottom, rqRight);
                             // The reply is the negated 16 bit sum, as on DEC terminals.
                             mSession.write(String.format(Locale.US, "\033P%d!~%04X\033\\", getArg(0, 0, false), (0x10000 - (rqSum & 0xFFFF)) & 0xFFFF));
