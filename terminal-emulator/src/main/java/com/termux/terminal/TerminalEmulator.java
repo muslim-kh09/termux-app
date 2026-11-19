@@ -1950,9 +1950,10 @@ public final class TerminalEmulator {
                 TerminalBuffer newScreen = setting ? mAltBuffer : mMainBuffer;
                 if (newScreen != mScreen) {
                     boolean resized = !(newScreen.mColumns == mColumns && newScreen.mScreenRows == mRows);
-                    if (setting) saveCursor();
+                    // Modes 47 and 1047 leave the cursor alone, like xterm.
+                    if (setting && externalBit == 1049) saveCursor();
                     mScreen = newScreen;
-                    if (!setting) {
+                    if (!setting && externalBit == 1049) {
                         int col = mSavedStateMain.mSavedCursorCol;
                         int row = mSavedStateMain.mSavedCursorRow;
                         restoreCursor();
