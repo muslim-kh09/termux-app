@@ -2252,11 +2252,13 @@ public final class TerminalEmulator {
             case '@': {
                 // "CSI{n}@" - Insert ${n} space characters (ICH) - http://www.vt100.net/docs/vt510-rm/ICH.
                 mAboutToAutoWrap = false;
-                int columnsAfterCursor = mColumns - mCursorCol;
-                int spacesToInsert = Math.min(getArg0(1), columnsAfterCursor);
-                int charsToMove = columnsAfterCursor - spacesToInsert;
-                mScreen.blockCopy(mCursorCol, mCursorRow, charsToMove, 1, mCursorCol + spacesToInsert, mCursorRow);
-                blockClear(mCursorCol, mCursorRow, spacesToInsert);
+                if (mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
+                    int columnsAfterCursor = mRightMargin - mCursorCol;
+                    int spacesToInsert = Math.min(getArg0(1), columnsAfterCursor);
+                    int charsToMove = columnsAfterCursor - spacesToInsert;
+                    mScreen.blockCopy(mCursorCol, mCursorRow, charsToMove, 1, mCursorCol + spacesToInsert, mCursorRow);
+                    blockClear(mCursorCol, mCursorRow, spacesToInsert);
+                }
             }
             break;
             case 'A': // "CSI${n}A" - Cursor up (CUU) ${n} rows.
@@ -2371,11 +2373,13 @@ public final class TerminalEmulator {
                 // Character attributes move with the characters. The terminal adds blank spaces with no visual character
                 // attributes at the right margin. DCH has no effect outside the scrolling margins."
                 mAboutToAutoWrap = false;
-                int cellsAfterCursor = mColumns - mCursorCol;
-                int cellsToDelete = Math.min(getArg0(1), cellsAfterCursor);
-                int cellsToMove = cellsAfterCursor - cellsToDelete;
-                mScreen.blockCopy(mCursorCol + cellsToDelete, mCursorRow, cellsToMove, 1, mCursorCol, mCursorRow);
-                blockClear(mCursorCol + cellsToMove, mCursorRow, cellsToDelete);
+                if (mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
+                    int cellsAfterCursor = mRightMargin - mCursorCol;
+                    int cellsToDelete = Math.min(getArg0(1), cellsAfterCursor);
+                    int cellsToMove = cellsAfterCursor - cellsToDelete;
+                    mScreen.blockCopy(mCursorCol + cellsToDelete, mCursorRow, cellsToMove, 1, mCursorCol, mCursorRow);
+                    blockClear(mCursorCol + cellsToMove, mCursorRow, cellsToDelete);
+                }
             }
             break;
             case 'S': { // "${CSI}${N}S" - scroll up ${N} lines (default = 1) (SU).
