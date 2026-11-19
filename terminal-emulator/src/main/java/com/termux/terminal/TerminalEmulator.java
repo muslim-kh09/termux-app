@@ -2236,7 +2236,8 @@ public final class TerminalEmulator {
         mForeColor = state.mSavedForeColor;
         mBackColor = state.mSavedBackColor;
         mUnderlineColor = state.mSavedUnderlineColor;
-        int mask = (DECSET_BIT_AUTOWRAP | DECSET_BIT_ORIGIN_MODE);
+        // Only the pending wrap flag and origin mode are restored, auto wrap mode itself is not.
+        int mask = DECSET_BIT_ORIGIN_MODE;
         mCurrentDecSetFlags = (mCurrentDecSetFlags & ~mask) | (state.mSavedDecFlags & mask);
         mUseLineDrawingG0 = state.mUseLineDrawingG0;
         mUseLineDrawingG1 = state.mUseLineDrawingG1;
