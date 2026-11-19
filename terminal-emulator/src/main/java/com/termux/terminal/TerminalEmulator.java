@@ -2339,21 +2339,28 @@ public final class TerminalEmulator {
                 break;
             case 'L': // "${CSI}{N}L" - insert ${N} lines (IL).
             {
-                int linesAfterCursor = mBottomMargin - mCursorRow;
-                int linesToInsert = Math.min(getArg0(1), linesAfterCursor);
-                int linesToMove = linesAfterCursor - linesToInsert;
-                mScreen.blockCopy(0, mCursorRow, mColumns, linesToMove, 0, mCursorRow + linesToInsert);
-                blockClear(0, mCursorRow, mColumns, linesToInsert);
+                // Only inside the top, bottom, left and right margins, and only the columns between the margins move.
+                if (mCursorRow >= mTopMargin && mCursorRow < mBottomMargin && mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
+                    int width = mRightMargin - mLeftMargin;
+                    int linesAfterCursor = mBottomMargin - mCursorRow;
+                    int linesToInsert = Math.min(getArg0(1), linesAfterCursor);
+                    int linesToMove = linesAfterCursor - linesToInsert;
+                    mScreen.blockCopy(mLeftMargin, mCursorRow, width, linesToMove, mLeftMargin, mCursorRow + linesToInsert);
+                    blockClear(mLeftMargin, mCursorRow, width, linesToInsert);
+                }
             }
             break;
             case 'M': // "${CSI}${N}M" - delete N lines (DL).
             {
                 mAboutToAutoWrap = false;
-                int linesAfterCursor = mBottomMargin - mCursorRow;
-                int linesToDelete = Math.min(getArg0(1), linesAfterCursor);
-                int linesToMove = linesAfterCursor - linesToDelete;
-                mScreen.blockCopy(0, mCursorRow + linesToDelete, mColumns, linesToMove, 0, mCursorRow);
-                blockClear(0, mCursorRow + linesToMove, mColumns, linesToDelete);
+                if (mCursorRow >= mTopMargin && mCursorRow < mBottomMargin && mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
+                    int width = mRightMargin - mLeftMargin;
+                    int linesAfterCursor = mBottomMargin - mCursorRow;
+                    int linesToDelete = Math.min(getArg0(1), linesAfterCursor);
+                    int linesToMove = linesAfterCursor - linesToDelete;
+                    mScreen.blockCopy(mLeftMargin, mCursorRow + linesToDelete, width, linesToMove, mLeftMargin, mCursorRow);
+                    blockClear(mLeftMargin, mCursorRow + linesToMove, width, linesToDelete);
+                }
             }
             break;
             case 'P': // "${CSI}{N}P" - delete ${N} characters (DCH).
