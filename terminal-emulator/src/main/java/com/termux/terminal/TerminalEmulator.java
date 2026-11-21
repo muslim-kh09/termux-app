@@ -454,6 +454,9 @@ public final class TerminalEmulator {
 
     private static final String LOG_TAG = "TerminalEmulator";
 
+    /** The answer to DA1 and DECID, a VT420 with the features that are implemented, like xterm. */
+    private static final String PRIMARY_DEVICE_ATTRIBUTES = "\033[?64;1;2;4;6;9;15;18;21;22c";
+
     private boolean isDecsetInternalBitSet(int bit) {
         return (mCurrentDecSetFlags & bit) != 0;
     }
@@ -2151,6 +2154,9 @@ public final class TerminalEmulator {
                     mScreen.blockSet(mRightMargin - 1, mTopMargin, 1, rows, ' ', TextStyle.encode(mForeColor, mBackColor, 0));
                 }
                 break;
+            case 'Z': // DECID - Identify Terminal (http://vt100.net/docs/vt510-rm/DECID), the same as DA1.
+                mSession.write(PRIMARY_DEVICE_ATTRIBUTES);
+                break;
             case 'c': // RIS - Reset to Initial State (http://vt100.net/docs/vt510-rm/RIS).
                 reset();
                 mMainBuffer.clearTranscript();
@@ -2462,7 +2468,7 @@ public final class TerminalEmulator {
                 // The important part that may still be used by some (tmux stores this value but does not currently use it)
                 // is the first response parameter identifying the terminal service class, where we send 64 for "vt420".
                 // This is followed by a list of attributes which is probably unused by applications. Send like xterm.
-                if (getArg0(0) == 0) mSession.write("\033[?64;1;2;4;6;9;15;18;21;22c");
+                if (getArg0(0) == 0) mSession.write(PRIMARY_DEVICE_ATTRIBUTES);
                 break;
             case 'd': // ESC [ Pn d - Vert Position Absolute
                 // Relative to the margins in origin mode, like CUP.
