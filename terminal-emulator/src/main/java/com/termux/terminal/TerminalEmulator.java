@@ -744,6 +744,11 @@ public final class TerminalEmulator {
 
 
 
+    /** True after "CSI 20 h", then the Enter key sends CR LF instead of CR. */
+    public boolean isLinefeedMode() {
+        return mLinefeedMode;
+    }
+
     public boolean isKeypadApplicationMode() {
         return isDecsetInternalBitSet(DECSET_BIT_APPLICATION_KEYPAD);
     }

@@ -918,6 +918,8 @@ public final class TerminalView extends View {
 
             // If left alt, send escape before the code point to make e.g. Alt+B and Alt+F work in readline:
             mTermSession.writeCodePoint(altDown, codePoint);
+            // In linefeed mode LNM the Enter key sends CR LF.
+            if (codePoint == '\r' && mEmulator != null && mEmulator.isLinefeedMode()) mTermSession.writeCodePoint(false, '\n');
         }
     }
 
@@ -954,7 +956,8 @@ public final class TerminalView extends View {
 
         String code = KeyHandler.getCode(keyCode, keyMod, term.isCursorKeysApplicationMode(), term.isKeypadApplicationMode());
         if (code == null) return false;
-        mTermSession.write(code);
+        // In linefeed mode LNM the Enter key sends CR LF.
+        mTermSession.write(term.isLinefeedMode() && "\r".equals(code) ? "\r\n" : code);
         return true;
     }
 
