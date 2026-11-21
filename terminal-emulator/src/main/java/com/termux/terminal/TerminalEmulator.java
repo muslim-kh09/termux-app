@@ -386,6 +386,10 @@ public final class TerminalEmulator {
     /** Linefeed mode LNM, where LF, VT and FF also move the cursor to the left margin. */
     private boolean mLinefeedMode;
 
+    /** The colors of the underline slots in cell styles as ARGB, slot 0 is never used. */
+    private final int[] mUnderlineSlotColors = new int[TextStyle.UNDERLINE_SLOT_MASK + 1];
+    private int mNextUnderlineSlot = 1;
+
     /** DEC modes that have no effect here but are remembered, so that DECRQM reports what the application set. */
     private int mRememberedDecModes;
 
@@ -3275,7 +3279,28 @@ public final class TerminalEmulator {
     }
 
     private long getStyle() {
-        return TextStyle.encode(mForeColor, mBackColor, mEffect);
+        return TextStyle.encode(mForeColor, mBackColor, mEffect, underlineSlot());
+    }
+
+    /**
+     * The slot for the current underline color, or 0 when the text is not underlined or has the default color. A color
+     * that is not in a slot yet takes the next one, so after 15 different colors the oldest cells change their color.
+     */
+    private int underlineSlot() {
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) == 0 || mUnderlineColor == TextStyle.COLOR_INDEX_FOREGROUND) return 0;
+        int color = (mUnderlineColor & 0xff000000) == 0xff000000 ? mUnderlineColor : mColors.mCurrentColors[mUnderlineColor];
+        for (int slot = 1; slot < mUnderlineSlotColors.length; slot++) {
+            if (mUnderlineSlotColors[slot] == color) return slot;
+        }
+        int slot = mNextUnderlineSlot;
+        mUnderlineSlotColors[slot] = color;
+        mNextUnderlineSlot = slot % TextStyle.UNDERLINE_SLOT_MASK + 1;
+        return slot;
+    }
+
+    /** The colors of the underline slots, indexed by {@link TextStyle#decodeUnderlineSlot(long)}. */
+    public int[] getUnderlineSlotColors() {
+        return mUnderlineSlotColors;
     }
 
     /** "CSI P_m h" for set or "CSI P_m l" for reset ANSI mode. */
