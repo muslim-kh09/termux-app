@@ -389,6 +389,11 @@ public final class TerminalEmulator {
     /** DEC modes that have no effect here but are remembered, so that DECRQM reports what the application set. */
     private int mRememberedDecModes;
 
+    /** The ANSI modes GATM, SRTM, VEM, HEM, PUM, FEAM, FETM, MATM, TTM, SATM, TSM and EBM, which are never set. */
+    private static boolean isPermanentlyResetAnsiMode(int mode) {
+        return mode == 1 || mode == 5 || (mode >= 7 && mode <= 11) || (mode >= 13 && mode <= 19);
+    }
+
     private static int rememberedDecModeBit(int mode) {
         switch (mode) {
             case 4: return 1; // DECSCLM.
@@ -954,6 +959,7 @@ public final class TerminalEmulator {
                                 int ansiValue;
                                 if (ansiMode == 4) ansiValue = mInsertMode ? 1 : 2;
                                 else if (ansiMode == 20) ansiValue = mLinefeedMode ? 1 : 2;
+                                else if (isPermanentlyResetAnsiMode(ansiMode)) ansiValue = 4;
                                 else ansiValue = 0;
                                 mSession.write(String.format(Locale.US, "\033[%d;%d$y", ansiMode, ansiValue));
                                 break;
