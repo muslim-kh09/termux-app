@@ -552,7 +552,7 @@ public final class TerminalBuffer {
                 } else {
                     effect &= ~bits;
                 }
-                line.mStyle[x] = TextStyle.encode(foreColor, backColor, effect);
+                line.mStyle[x] = TextStyle.encode(foreColor, backColor, effect, TextStyle.decodeUnderlineSlot(currentStyle));
             }
             line.invalidateBidiLayout();
         }
