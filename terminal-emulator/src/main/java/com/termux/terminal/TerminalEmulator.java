@@ -386,6 +386,19 @@ public final class TerminalEmulator {
     /** Linefeed mode LNM, where LF, VT and FF also move the cursor to the left margin. */
     private boolean mLinefeedMode;
 
+    /** DEC modes that have no effect here but are remembered, so that DECRQM reports what the application set. */
+    private int mRememberedDecModes;
+
+    private static int rememberedDecModeBit(int mode) {
+        switch (mode) {
+            case 4: return 1; // DECSCLM.
+            case 18: return 1 << 1; // DECPFF.
+            case 19: return 1 << 2; // DECPEX.
+            case 60: return 1 << 3; // DECHCCM.
+            default: return 0;
+        }
+    }
+
     /** An array of tab stops. mTabStop[i] is true if there is a tab stop set for column i. */
     private boolean[] mTabStop;
 
@@ -1125,6 +1138,8 @@ public final class TerminalEmulator {
                                 // DECSET 12 (att610) - start/stop blinking cursor.
                                 // Supported for set/reset and must also be queryable via DECRQM, matching xterm.
                                 value = isCursorBlinking() ? 1 : 2;
+                            } else if (rememberedDecModeBit(mode) != 0) {
+                                value = (mRememberedDecModes & rememberedDecModeBit(mode)) != 0 ? 1 : 2;
                             } else {
                                 int internalBit = mapDecSetBitToInternalBit(mode);
                                 if (internalBit != -1) {
@@ -1926,7 +1941,13 @@ public final class TerminalEmulator {
                 blockClear(0, 0, mColumns, mRows);
                 setCursorRowCol(0, 0);
                 break;
-            case 4: // DECSCLM-Scrolling Mode. Ignore.
+            case 4: // DECSCLM-Scrolling Mode.
+            case 18: // DECPFF - Print form feed.
+            case 19: // DECPEX - Print extent.
+            case 60: // DECHCCM - Horizontal cursor coupling.
+                // None of these has an effect, they are only remembered.
+                if (setting) mRememberedDecModes |= rememberedDecModeBit(externalBit);
+                else mRememberedDecModes &= ~rememberedDecModeBit(externalBit);
                 break;
             case 5: // Reverse video. No action.
                 break;
@@ -3799,6 +3820,7 @@ public final class TerminalEmulator {
         mInsertMode = false;
         mLinefeedMode = false;
         mEffect = 0;
+        mRememberedDecModes = 0;
         mTopMargin = mLeftMargin = 0;
         mBottomMargin = mRows;
         mRightMargin = mColumns;
