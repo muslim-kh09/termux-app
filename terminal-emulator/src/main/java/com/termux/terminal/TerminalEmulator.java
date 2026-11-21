@@ -2724,6 +2724,7 @@ public final class TerminalEmulator {
             if (code == 0) { // reset
                 mForeColor = TextStyle.COLOR_INDEX_FOREGROUND;
                 mBackColor = TextStyle.COLOR_INDEX_BACKGROUND;
+                mUnderlineColor = TextStyle.COLOR_INDEX_FOREGROUND;
                 mEffect = 0;
             } else if (code == 1) {
                 mEffect |= TextStyle.CHARACTER_ATTRIBUTE_BOLD;
