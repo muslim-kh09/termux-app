@@ -389,6 +389,36 @@ public final class TerminalEmulator {
     /** DEC modes that have no effect here but are remembered, so that DECRQM reports what the application set. */
     private int mRememberedDecModes;
 
+    /** The SGR parameters that describe the current attributes and colors, starting with the reset 0. */
+    private String currentSgrParameters() {
+        StringBuilder sgr = new StringBuilder("0");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_BOLD) != 0) sgr.append(";1");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_DIM) != 0) sgr.append(";2");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_ITALIC) != 0) sgr.append(";3");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) != 0) sgr.append(";4");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_BLINK) != 0) sgr.append(";5");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_INVERSE) != 0) sgr.append(";7");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_INVISIBLE) != 0) sgr.append(";8");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_STRIKETHROUGH) != 0) sgr.append(";9");
+        appendSgrColor(sgr, mForeColor, 30, 90, 38);
+        appendSgrColor(sgr, mBackColor, 40, 100, 48);
+        return sgr.toString();
+    }
+
+    private static void appendSgrColor(StringBuilder sgr, int color, int normalBase, int brightBase, int extendedCode) {
+        if ((color & 0xff000000) == 0xff000000) {
+            sgr.append(';').append(extendedCode).append(";2;").append((color >> 16) & 0xff)
+                .append(';').append((color >> 8) & 0xff).append(';').append(color & 0xff);
+        } else if (color < 8) {
+            sgr.append(';').append(normalBase + color);
+        } else if (color < 16) {
+            sgr.append(';').append(brightBase + color - 8);
+        } else if (color < 256) {
+            sgr.append(';').append(extendedCode).append(";5;").append(color);
+        }
+        // The default colors are not reported.
+    }
+
     /** The ANSI modes GATM, SRTM, VEM, HEM, PUM, FEAM, FETM, MATM, TTM, SATM, TSM and EBM, which are never set. */
     private static boolean isPermanentlyResetAnsiMode(int mode) {
         return mode == 1 || mode == 5 || (mode >= 7 && mode <= 11) || (mode >= 13 && mode <= 19);
@@ -1278,6 +1308,18 @@ public final class TerminalEmulator {
                         // Values 1 and 2 are block, 3 and 4 underline, 5 and 6 bar, odd values blink.
                         int cursorStyleCode = mCursorStyle * 2 + (isCursorBlinking() ? 1 : 2);
                         mSession.write("\033P1$r" + cursorStyleCode + " q\033\\");
+                    } else if (dcs.equals("$qm")) {
+                        // SGR, the active character attributes and colors. Applications use it to detect true color.
+                        mSession.write("\033P1$r" + currentSgrParameters() + "m\033\\");
+                    } else if (dcs.equals("$q\"q")) {
+                        // DECSCA, the character protection attribute.
+                        mSession.write("\033P1$r" + ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_PROTECTED) != 0 ? 1 : 0) + "\"q\033\\");
+                    } else if (dcs.equals("$q$}")) {
+                        // DECSASD, the main display is always the active one.
+                        mSession.write("\033P1$r0$}\033\\");
+                    } else if (dcs.equals("$q$~")) {
+                        // DECSSDT, there is no status line.
+                        mSession.write("\033P1$r0$~\033\\");
                     } else if (dcs.equals("$qr")) {
                         // DECSTBM, top and bottom margins.
                         mSession.write("\033P1$r" + (mTopMargin + 1) + ";" + mBottomMargin + "r\033\\");
