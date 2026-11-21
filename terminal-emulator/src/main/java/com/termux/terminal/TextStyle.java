@@ -8,7 +8,7 @@ package com.termux.terminal;
  * <p>
  * The bit layout is:
  * </p>
- * - 16 flags (11 currently used).
+ * - 16 flags (11 currently used, 4 for the underline color slot and 1 for a bitmap).
  * - 24 for foreground color (only 9 first bits if a color index).
  * - 24 for background color (only 9 first bits if a color index).
  */
@@ -38,6 +38,14 @@ public final class TextStyle {
     /** If true, character represents a {@link TerminalBitmap} slice, not text. */
     public final static int TERMINAL_BITMAP = 1 << 15;
 
+    /**
+     * The underline color does not fit in the cell style, so the style holds a slot number instead. The slot is local
+     * to the row of the cell, the row maps it to a color, see {@link TerminalRow#getUnderlineColor(long)}. Slot 0 means
+     * the foreground color. A style must only be used again in the row it came from, or together with its color.
+     */
+    public final static int UNDERLINE_SLOT_SHIFT = 11;
+    public final static int UNDERLINE_SLOT_MASK = 0xf;
+
     public final static int COLOR_INDEX_FOREGROUND = 256;
     public final static int COLOR_INDEX_BACKGROUND = 257;
     public final static int COLOR_INDEX_CURSOR = 258;
@@ -49,7 +57,11 @@ public final class TextStyle {
     final static long NORMAL = encode(COLOR_INDEX_FOREGROUND, COLOR_INDEX_BACKGROUND, 0);
 
     static long encode(int foreColor, int backColor, int effect) {
-        long result = effect & 0b111111111;
+        return encode(foreColor, backColor, effect, 0);
+    }
+
+    static long encode(int foreColor, int backColor, int effect, int underlineSlot) {
+        long result = (effect & 0b111111111) | ((long) (underlineSlot & UNDERLINE_SLOT_MASK) << UNDERLINE_SLOT_SHIFT);
         if ((0xff000000 & foreColor) == 0xff000000) {
             // 24-bit color.
             result |= CHARACTER_ATTRIBUTE_TRUECOLOR_FOREGROUND | ((foreColor & 0x00ffffffL) << 40L);
@@ -87,6 +99,11 @@ public final class TextStyle {
 
     public static int decodeEffect(long style) {
         return (int) (style & 0b11111111111);
+    }
+
+    /** The slot of the underline color, 0 if the underline has the foreground color. */
+    public static int decodeUnderlineSlot(long style) {
+        return (int) ((style >>> UNDERLINE_SLOT_SHIFT) & UNDERLINE_SLOT_MASK);
     }
 
 

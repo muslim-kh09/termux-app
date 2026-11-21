@@ -695,6 +695,29 @@ public final class TerminalRenderer {
                 mTextSize, mTypeface, mFontWidth, altBuffer);
     }
 
+    /** The row that is drawn, it maps the underline slots of its cell styles to colors. Only set while {@link #render} runs. */
+    private TerminalRow mUnderlineRow;
+
+    /** The underline color of the cell that was configured last by configurePaintForCell, 0 for the text color. */
+    private int mCellUnderlineColor;
+
+    private final Paint mUnderlinePaint = new Paint();
+
+    /** The color of the underline for a style, or 0 if the underline is not colored. */
+    private int underlineColorOf(long style, int effect) {
+        if ((effect & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) == 0 || mUnderlineRow == null) return 0;
+        return mUnderlineRow.getUnderlineColor(style);
+    }
+
+    /** Draws an underline of its own color, the underline of the text paint can only have the text color. */
+    private void drawColoredUnderline(Canvas canvas, float left, float right, float baseline, int color) {
+        if (color == 0) return;
+        float textSize = mTextPaint.getTextSize();
+        float top = baseline + textSize / 9f;
+        mUnderlinePaint.setColor(color);
+        canvas.drawRect(left, top, right, top + Math.max(1f, textSize / 18f), mUnderlinePaint);
+    }
+
     /** Renders the terminal into {@code canvas}, starting at {@code topRow} with an optional selection range. */
     public final void render(TerminalEmulator mEmulator, Canvas canvas, int topRow,
                              int selectionY1, int selectionY2, int selectionX1, int selectionX2) {
@@ -748,6 +771,8 @@ public final class TerminalRenderer {
                 continue;
             }
 
+            mUnderlineRow = lineObject;
+
             if (!lineObject.mMayContainRtlOrBidi && paragraphDir != BidiLayout.DIR_RTL) {
                 renderPureLtrRow(lineObject, screen, canvas, palette, columns,
                         cursorX, selx1, selx2, cursorShape, reverseVideo, heightOffset);
@@ -773,6 +798,7 @@ public final class TerminalRenderer {
             paragraphDir = wrapped ? layout.resolvedBaseDirection : BidiLayout.DIR_DEFAULT;
             paragraphStartsWithPrompt = wrapped && layout.paragraphStartsWithPrompt;
         }
+        mUnderlineRow = null;
     }
 
     /** Zero-allocation fast path matching upstream Termux performance for pure LTR rows. */
@@ -1164,6 +1190,7 @@ public final class TerminalRenderer {
         } else {
             canvas.drawText(mCellMeasureBuffer, 0, 1, gx, baseline, mTextPaint);
         }
+        drawColoredUnderline(canvas, gx, geo.visRight[vCol], baseline, mCellUnderlineColor);
     }
 
     private void drawContinuousLtrRun(Canvas canvas, BidiLayout.LogicalCell[] visualCells,
@@ -1214,6 +1241,7 @@ public final class TerminalRenderer {
             canvas.drawText(mRunCharBuffer, 0, used, drawX, baseline, mTextPaint);
         }
         if (saved) canvas.restore();
+        drawColoredUnderline(canvas, slotLeft, slotRight, baseline, mCellUnderlineColor);
     }
 
     private void drawContinuousRtlSpan(Canvas canvas, BidiLayout.LogicalCell[] visualCells,
@@ -1803,6 +1831,8 @@ public final class TerminalRenderer {
                     int dispCp = dCell.isRtl ? getMirroredAsciiChar(dCell.codePoint) : dCell.codePoint;
                     mCellMeasureBuffer[0] = (char) dispCp;
                     canvas.drawText(mCellMeasureBuffer, 0, 1, mSegLeft[s], baseline, mTextPaint);
+                    drawColoredUnderline(canvas, mSegLeft[s], mSegLeft[s] + mTextPaint.measureText(mCellMeasureBuffer, 0, 1),
+                        baseline, mCellUnderlineColor);
                 }
             } else {
                 int segStartCol = startCol + sStart;
@@ -2020,8 +2050,9 @@ public final class TerminalRenderer {
             textColor = 0xFF000000 | (red << 16) | (green << 8) | blue;
         }
 
+        mCellUnderlineColor = underlineColorOf(style, effect);
         mTextPaint.setFakeBoldText(bold);
-        mTextPaint.setUnderlineText(underline);
+        mTextPaint.setUnderlineText(underline && mCellUnderlineColor == 0);
         mTextPaint.setTextSkewX(italic ? -0.35f : 0.f);
         mTextPaint.setStrikeThruText(strikeThrough);
         mTextPaint.setColor(textColor);
@@ -2048,6 +2079,7 @@ public final class TerminalRenderer {
         } else {
             canvas.drawText(text, offset, used, x, baseline, mTextPaint);
         }
+        drawColoredUnderline(canvas, x, x + mTextPaint.measureText(text, offset, used), baseline, mCellUnderlineColor);
 
         if (needSave) canvas.restore();
     }
@@ -2080,6 +2112,7 @@ public final class TerminalRenderer {
         final boolean italic = (effect & TextStyle.CHARACTER_ATTRIBUTE_ITALIC) != 0;
         final boolean strikeThrough = (effect & TextStyle.CHARACTER_ATTRIBUTE_STRIKETHROUGH) != 0;
         final boolean dim = (effect & TextStyle.CHARACTER_ATTRIBUTE_DIM) != 0;
+        final int underlineColor = underlineColorOf(textStyle, effect);
 
         foreColor = resolveForeColor(foreColor, bold, palette);
         backColor = resolveBackColor(backColor, palette);
@@ -2126,7 +2159,7 @@ public final class TerminalRenderer {
             }
 
             mTextPaint.setFakeBoldText(bold);
-            mTextPaint.setUnderlineText(underline);
+            mTextPaint.setUnderlineText(underline && underlineColor == 0);
             mTextPaint.setTextSkewX(italic ? -0.35f : 0.f);
             mTextPaint.setStrikeThruText(strikeThrough);
             mTextPaint.setColor(foreColor);
@@ -2138,6 +2171,7 @@ public final class TerminalRenderer {
             } else {
                 canvas.drawText(text, startCharIndex, runWidthChars, left, y - mFontLineSpacingAndAscent, mTextPaint);
             }
+            drawColoredUnderline(canvas, left, right, y - mFontLineSpacingAndAscent, underlineColor);
         }
 
         if (savedMatrix) canvas.restore();

@@ -11,6 +11,8 @@ public final class TerminalRow {
 
     private static final float SPARE_CAPACITY_FACTOR = 1.5f;
 
+    private static final long UNDERLINE_SLOT_BITS = (long) TextStyle.UNDERLINE_SLOT_MASK << TextStyle.UNDERLINE_SLOT_SHIFT;
+
     /**
      * Max combining characters that can exist in a column, that are separate from the base character
      * itself. Any additional combining characters will be ignored and not added to the column.
@@ -57,6 +59,8 @@ public final class TerminalRow {
     public int[] mVisualToLogical;
     /** If this row has a {@link TerminalBitmap}. Used for performance only. */
     public boolean mHasTerminalBitmap;
+    /** The colors of the underline slots of this row as ARGB, null until a cell gets an underline color. Slot 0 is unused. */
+    private int[] mUnderlineSlotColors;
 
     /** Returns true if {@code codePoint} belongs to an RTL script or BiDi formatting block. */
     public static boolean isRtlOrBidiCodePoint(int codePoint) {
@@ -86,13 +90,20 @@ public final class TerminalRow {
         clear(style);
     }
 
-    /** NOTE: The sourceX2 is exclusive. */
+    /**
+     * Copies cells, also inside one row. A copy inside one row reads the old text and the old styles from a snapshot,
+     * because the cells that were already written must not change what is read later.
+     * NOTE: The sourceX2 is exclusive.
+     */
     public void copyInterval(TerminalRow line, int sourceX1, int sourceX2, int destinationX) {
         mHasNonOneWidthOrSurrogateChars |= line.mHasNonOneWidthOrSurrogateChars;
         final int x1 = line.findStartOfColumn(sourceX1);
         final int x2 = line.findStartOfColumn(sourceX2);
         boolean startingFromSecondHalfOfWideChar = (sourceX1 > 0 && line.wideDisplayCharacterStartingAt(sourceX1 - 1));
         final char[] sourceChars = (this == line) ? Arrays.copyOf(line.mText, line.mText.length) : line.mText;
+        final long[] sourceStyles = (this == line) ? Arrays.copyOf(line.mStyle, line.mStyle.length) : line.mStyle;
+        final int[] sourceUnderlineColors = (this == line && mUnderlineSlotColors != null)
+            ? Arrays.copyOf(mUnderlineSlotColors, mUnderlineSlotColors.length) : line.mUnderlineSlotColors;
         int latestNonCombiningWidth = 0;
         for (int i = x1; i < x2; i++) {
             char sourceChar = sourceChars[i];
@@ -108,7 +119,8 @@ public final class TerminalRow {
                 sourceX1 += latestNonCombiningWidth;
                 latestNonCombiningWidth = w;
             }
-            setChar(destinationX, codePoint, line.getStyle(sourceX1));
+            final long sourceStyle = sourceStyles[sourceX1];
+            setChar(destinationX, codePoint, sourceStyle, underlineColorOf(sourceUnderlineColors, sourceStyle));
         }
     }
 
@@ -171,12 +183,14 @@ public final class TerminalRow {
 
     public void clear(long style) {
         Arrays.fill(mText, ' ');
-        Arrays.fill(mStyle, style);
+        Arrays.fill(mStyle, style & ~UNDERLINE_SLOT_BITS);
+        mUnderlineSlotColors = null;
         mSpaceUsed = mColumns;
         mHasNonOneWidthOrSurrogateChars = false;
         mMayContainRtlOrBidi = false;
         invalidateBidiLayout();
         mHasTerminalBitmap = false;
+        mLineWrap = false;
     }
 
     // https://github.com/steven676/Android-Terminal-Emulator/commit/9a47042620bec87617f0b4f5d50568535668fe26
@@ -307,6 +321,70 @@ public final class TerminalRow {
                 mSpaceUsed -= nextLen;
             }
         }
+    }
+
+    /** The underline color of a cell with this style as ARGB, or 0 if the underline has the foreground color. */
+    public int getUnderlineColor(long style) {
+        return underlineColorOf(mUnderlineSlotColors, style);
+    }
+
+    private static int underlineColorOf(int[] slotColors, long style) {
+        final int slot = TextStyle.decodeUnderlineSlot(style);
+        return (slot == 0 || slotColors == null) ? 0 : slotColors[slot];
+    }
+
+    /**
+     * Same as {@link #setChar(int, int, long)}, but the underline color is given as ARGB instead of as a slot in the
+     * style, 0 means the foreground color. The slot bits of {@code style} are replaced.
+     */
+    public void setChar(int columnToSet, int codePoint, long style, int underlineColor) {
+        style &= ~UNDERLINE_SLOT_BITS;
+        if (underlineColor != 0) style |= (long) slotForUnderlineColor(underlineColor) << TextStyle.UNDERLINE_SLOT_SHIFT;
+        setChar(columnToSet, codePoint, style);
+    }
+
+    /** Finds the slot of a color, or takes a free one. */
+    private int slotForUnderlineColor(int color) {
+        if (mUnderlineSlotColors == null) mUnderlineSlotColors = new int[TextStyle.UNDERLINE_SLOT_MASK + 1];
+        final int[] colors = mUnderlineSlotColors;
+        for (int slot = 1; slot < colors.length; slot++) {
+            if (colors[slot] == color) return slot;
+        }
+        for (int slot = 1; slot < colors.length; slot++) {
+            if (colors[slot] == 0) {
+                colors[slot] = color;
+                return slot;
+            }
+        }
+        // All slots hold a color, so release the ones that no cell uses any more.
+        final boolean[] used = new boolean[colors.length];
+        for (long cellStyle : mStyle) used[TextStyle.decodeUnderlineSlot(cellStyle)] = true;
+        int freed = 0;
+        for (int slot = 1; slot < colors.length; slot++) {
+            if (!used[slot]) {
+                colors[slot] = 0;
+                if (freed == 0) freed = slot;
+            }
+        }
+        if (freed != 0) {
+            colors[freed] = color;
+            return freed;
+        }
+        // Every slot is used by a cell, so the cells that take the new color get the closest one of the 15 colors.
+        int nearest = 1;
+        long nearestDistance = Long.MAX_VALUE;
+        for (int slot = 1; slot < colors.length; slot++) {
+            long distance = 0;
+            for (int shift = 0; shift < 24; shift += 8) {
+                long d = ((colors[slot] >>> shift) & 0xff) - ((color >>> shift) & 0xff);
+                distance += d * d;
+            }
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearest = slot;
+            }
+        }
+        return nearest;
     }
 
     boolean isBlank() {

@@ -210,6 +210,10 @@ public final class TerminalEmulator {
     private static final int DECSET_BIT_LEFTRIGHT_MARGIN_MODE = 1 << 11;
     /** Not really DECSET bit... - http://www.vt100.net/docs/vt510-rm/DECSACE */
     private static final int DECSET_BIT_RECTANGULAR_CHANGEATTRIBUTE = 1 << 12;
+    /** DECSET 45, reverse wrap-around to lines that were wrapped. */
+    private static final int DECSET_BIT_REVERSE_WRAP = 1 << 13;
+    /** DECSET 1045, reverse wrap-around to any line, and from the top margin to the bottom margin. */
+    private static final int DECSET_BIT_REVERSE_WRAP_EXTENDED = 1 << 14;
 
 
     private String mTitle;
@@ -379,6 +383,57 @@ public final class TerminalEmulator {
      */
     private boolean mInsertMode;
 
+    /** Linefeed mode LNM, where LF, VT and FF also move the cursor to the left margin. */
+    private boolean mLinefeedMode;
+
+    /** DEC modes that have no effect here but are remembered, so that DECRQM reports what the application set. */
+    private int mRememberedDecModes;
+
+    /** The SGR parameters that describe the current attributes and colors, starting with the reset 0. */
+    private String currentSgrParameters() {
+        StringBuilder sgr = new StringBuilder("0");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_BOLD) != 0) sgr.append(";1");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_DIM) != 0) sgr.append(";2");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_ITALIC) != 0) sgr.append(";3");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) != 0) sgr.append(";4");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_BLINK) != 0) sgr.append(";5");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_INVERSE) != 0) sgr.append(";7");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_INVISIBLE) != 0) sgr.append(";8");
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_STRIKETHROUGH) != 0) sgr.append(";9");
+        appendSgrColor(sgr, mForeColor, 30, 90, 38);
+        appendSgrColor(sgr, mBackColor, 40, 100, 48);
+        return sgr.toString();
+    }
+
+    private static void appendSgrColor(StringBuilder sgr, int color, int normalBase, int brightBase, int extendedCode) {
+        if ((color & 0xff000000) == 0xff000000) {
+            sgr.append(';').append(extendedCode).append(";2;").append((color >> 16) & 0xff)
+                .append(';').append((color >> 8) & 0xff).append(';').append(color & 0xff);
+        } else if (color < 8) {
+            sgr.append(';').append(normalBase + color);
+        } else if (color < 16) {
+            sgr.append(';').append(brightBase + color - 8);
+        } else if (color < 256) {
+            sgr.append(';').append(extendedCode).append(";5;").append(color);
+        }
+        // The default colors are not reported.
+    }
+
+    /** The ANSI modes GATM, SRTM, VEM, HEM, PUM, FEAM, FETM, MATM, TTM, SATM, TSM and EBM, which are never set. */
+    private static boolean isPermanentlyResetAnsiMode(int mode) {
+        return mode == 1 || mode == 5 || (mode >= 7 && mode <= 11) || (mode >= 13 && mode <= 19);
+    }
+
+    private static int rememberedDecModeBit(int mode) {
+        switch (mode) {
+            case 4: return 1; // DECSCLM.
+            case 18: return 1 << 1; // DECPFF.
+            case 19: return 1 << 2; // DECPEX.
+            case 60: return 1 << 3; // DECHCCM.
+            default: return 0;
+        }
+    }
+
     /** An array of tab stops. mTabStop[i] is true if there is a tab stop set for column i. */
     private boolean[] mTabStop;
 
@@ -407,6 +462,12 @@ public final class TerminalEmulator {
      * is {@code true}.
      */
     private boolean mCursorBlinkState;
+
+    /** Blink mode requested by DECSCUSR, null when the app has not requested one. */
+    private Boolean mCursorBlinkRequested;
+
+    /** Set when an application chose the cursor style, so a new client must not reset it. */
+    private boolean mCursorStyleRequested;
 
     /**
      * Current foreground, background and underline colors. Can either be a color index in [0,259] or a truecolor (24-bit) value.
@@ -440,6 +501,9 @@ public final class TerminalEmulator {
     public final TerminalColors mColors = new TerminalColors();
 
     private static final String LOG_TAG = "TerminalEmulator";
+
+    /** The answer to DA1 and DECID, a VT420 with the features that are implemented, like xterm. */
+    private static final String PRIMARY_DEVICE_ATTRIBUTES = "\033[?64;1;2;4;6;9;15;18;21;22c";
 
     private boolean isDecsetInternalBitSet(int bit) {
         return (mCurrentDecSetFlags & bit) != 0;
@@ -477,6 +541,10 @@ public final class TerminalEmulator {
                 return DECSET_BIT_APPLICATION_KEYPAD;
             case 69:
                 return DECSET_BIT_LEFTRIGHT_MARGIN_MODE;
+            case 45:
+                return DECSET_BIT_REVERSE_WRAP;
+            case 1045:
+                return DECSET_BIT_REVERSE_WRAP_EXTENDED;
             case 1000:
                 return DECSET_BIT_MOUSE_TRACKING_PRESS_RELEASE;
             case 1002:
@@ -508,7 +576,8 @@ public final class TerminalEmulator {
 
     public void updateTerminalSessionClient(TerminalSessionClient client) {
         mClient = client;
-        setCursorStyle();
+        // A new client only changes the default, not a style chosen by the application.
+        if (!mCursorStyleRequested) setCursorStyle();
         setCursorBlinkState(true);
     }
 
@@ -635,11 +704,17 @@ public final class TerminalEmulator {
             mCursorStyle = cursorStyle;
     }
 
+    /** Apply a cursor style requested by DECSCUSR together with its blink mode. */
+    private void applyCursorStyle(int style, boolean blinking) {
+        mCursorStyle = style;
+        mCursorStyleRequested = true;
+        mCursorBlinkRequested = blinking;
+        mCursorBlinkState = true;
+    }
+
     public boolean isReverseVideo() {
         return isDecsetInternalBitSet(DECSET_BIT_REVERSE_VIDEO);
     }
-
-
 
     public boolean isCursorEnabled() {
         return isDecsetInternalBitSet(DECSET_BIT_CURSOR_ENABLED);
@@ -648,7 +723,15 @@ public final class TerminalEmulator {
         if (!isCursorEnabled())
             return false;
         else
-            return mCursorBlinkingEnabled ? mCursorBlinkState : true;
+            return isCursorBlinking() ? mCursorBlinkState : true;
+    }
+
+    /**
+     * If the cursor should blink. A blink mode requested by an application with DECSCUSR or
+     * DECSET 12 takes priority over the setting of the user.
+     */
+    public boolean isCursorBlinking() {
+        return mCursorBlinkRequested != null ? mCursorBlinkRequested : mCursorBlinkingEnabled;
     }
 
     public void setCursorBlinkingEnabled(boolean cursorBlinkingEnabled) {
@@ -660,6 +743,11 @@ public final class TerminalEmulator {
     }
 
 
+
+    /** True after "CSI 20 h", then the Enter key sends CR LF instead of CR. */
+    public boolean isLinefeedMode() {
+        return mLinefeedMode;
+    }
 
     public boolean isKeypadApplicationMode() {
         return isDecsetInternalBitSet(DECSET_BIT_APPLICATION_KEYPAD);
@@ -799,16 +887,7 @@ public final class TerminalEmulator {
                     mSession.onBell();
                 break;
             case 8: // Backspace (BS, ^H).
-                if (mLeftMargin == mCursorCol) {
-                    // Jump to previous line if it was auto-wrapped.
-                    int previousRow = mCursorRow - 1;
-                    if (previousRow >= 0 && mScreen.getLineWrap(previousRow)) {
-                        mScreen.clearLineWrap(previousRow);
-                        setCursorRowCol(previousRow, mRightMargin - 1);
-                    }
-                } else {
-                    setCursorCol(mCursorCol - 1);
-                }
+                cursorBack(1);
                 break;
             case 9: // Horizontal tab (HT, \t) - move to next tab stop, but not past edge of screen
                 // XXX: Should perhaps use color if writing to new cells. Try with
@@ -828,13 +907,14 @@ public final class TerminalEmulator {
                     (mEscapeState == ESC_DCS ||
                     ((mEscapeState == ESC_OSC || mEscapeState == ESC_OSC__ESC) && mIgnoreCrLfForOsc))) {
                     doLinefeed();
+                    if (mLinefeedMode) carriageReturn();
                 }
                 break;
             case 13: // Carriage return (CR, \r).
                 if (!
                     (mEscapeState == ESC_DCS ||
                     ((mEscapeState == ESC_OSC || mEscapeState == ESC_OSC__ESC) && mIgnoreCrLfForOsc))) {
-                    setCursorCol(mLeftMargin);
+                    carriageReturn();
                 }
                 break;
             case 14: // Shift Out (Ctrl-N, SO) → Switch to Alternate Character Set. This invokes the G1 character set.
@@ -908,6 +988,17 @@ public final class TerminalEmulator {
                         int effectiveLeftMargin = originMode ? mLeftMargin : 0;
                         int effectiveRightMargin = originMode ? mRightMargin : mColumns;
                         switch (b) {
+                            case 'p': {
+                                // Request ANSI mode, DECRQM. 1 is set, 2 is reset, 0 is not recognized.
+                                int ansiMode = getArg0(0);
+                                int ansiValue;
+                                if (ansiMode == 4) ansiValue = mInsertMode ? 1 : 2;
+                                else if (ansiMode == 20) ansiValue = mLinefeedMode ? 1 : 2;
+                                else if (isPermanentlyResetAnsiMode(ansiMode)) ansiValue = 4;
+                                else ansiValue = 0;
+                                mSession.write(String.format(Locale.US, "\033[%d;%d$y", ansiMode, ansiValue));
+                                break;
+                            }
                             case 'v': // ${CSI}${SRC_TOP}${SRC_LEFT}${SRC_BOTTOM}${SRC_RIGHT}${SRC_PAGE}${DST_TOP}${DST_LEFT}${DST_PAGE}$v"
                                 // Copy rectangular area (DECCRA - http://vt100.net/docs/vt510-rm/DECCRA):
                                 // "If Pbs is greater than Pts, or Pls is greater than Prs, the terminal ignores DECCRA.
@@ -1042,17 +1133,25 @@ public final class TerminalEmulator {
                         }
                         break;
                     case ESC_CSI_SINGLE_QUOTE:
+                        boolean inMargins = mCursorRow >= mTopMargin && mCursorRow < mBottomMargin
+                            && mCursorCol >= mLeftMargin && mCursorCol < mRightMargin;
+                        int regionRows = mBottomMargin - mTopMargin;
                         if (b == '}') { // Insert Ps Column(s) (default = 1) (DECIC), VT420 and up.
-                            int columnsAfterCursor = mRightMargin - mCursorCol;
-                            int columnsToInsert = Math.min(getArg0(1), columnsAfterCursor);
-                            int columnsToMove = columnsAfterCursor - columnsToInsert;
-                            mScreen.blockCopy(mCursorCol, 0, columnsToMove, mRows, mCursorCol + columnsToInsert, 0);
-                            blockClear(mCursorCol, 0, columnsToInsert, mRows);
+                            if (inMargins) {
+                                int columnsAfterCursor = mRightMargin - mCursorCol;
+                                int columnsToInsert = Math.min(getArg0(1), columnsAfterCursor);
+                                int columnsToMove = columnsAfterCursor - columnsToInsert;
+                                mScreen.blockCopy(mCursorCol, mTopMargin, columnsToMove, regionRows, mCursorCol + columnsToInsert, mTopMargin);
+                                blockClear(mCursorCol, mTopMargin, columnsToInsert, regionRows);
+                            }
                         } else if (b == '~') { // Delete Ps Column(s) (default = 1) (DECDC), VT420 and up.
-                            int columnsAfterCursor = mRightMargin - mCursorCol;
-                            int columnsToDelete = Math.min(getArg0(1), columnsAfterCursor);
-                            int columnsToMove = columnsAfterCursor - columnsToDelete;
-                            mScreen.blockCopy(mCursorCol + columnsToDelete, 0, columnsToMove, mRows, mCursorCol, 0);
+                            if (inMargins) {
+                                int columnsAfterCursor = mRightMargin - mCursorCol;
+                                int columnsToDelete = Math.min(getArg0(1), columnsAfterCursor);
+                                int columnsToMove = columnsAfterCursor - columnsToDelete;
+                                mScreen.blockCopy(mCursorCol + columnsToDelete, mTopMargin, columnsToMove, regionRows, mCursorCol, mTopMargin);
+                                blockClear(mCursorCol + columnsToMove, mTopMargin, columnsToDelete, regionRows);
+                            }
                         } else {
                             unknownSequence(b);
                         }
@@ -1076,6 +1175,12 @@ public final class TerminalEmulator {
                             if (mode == 47 || mode == 1047 || mode == 1049) {
                                 // This state is carried by mScreen pointer.
                                 value = (mScreen == mAltBuffer) ? 1 : 2;
+                            } else if (mode == 12) {
+                                // DECSET 12 (att610) - start/stop blinking cursor.
+                                // Supported for set/reset and must also be queryable via DECRQM, matching xterm.
+                                value = isCursorBlinking() ? 1 : 2;
+                            } else if (rememberedDecModeBit(mode) != 0) {
+                                value = (mRememberedDecModes & rememberedDecModeBit(mode)) != 0 ? 1 : 2;
                             } else {
                                 int internalBit = mapDecSetBitToInternalBit(mode);
                                 if (internalBit != -1) {
@@ -1095,18 +1200,31 @@ public final class TerminalEmulator {
                         switch (b) {
                             case 'q': // "${CSI}${STYLE} q" - set cursor style (http://www.vt100.net/docs/vt510-rm/DECSCUSR).
                                 switch (arg) {
-                                    case 0: // Blinking block.
-                                    case 1: // Blinking block.
-                                    case 2: // Steady block.
-                                        mCursorStyle = TERMINAL_CURSOR_STYLE_BLOCK;
+                                    case 0: // Back to the default style chosen by the user.
+                                        setCursorStyle();
+                                        mCursorStyleRequested = false;
+                                        mCursorBlinkRequested = null;
+                                        mCursorBlinkState = true;
                                         break;
-                                    case 3: // Blinking underline.
-                                    case 4: // Steady underline.
-                                        mCursorStyle = TERMINAL_CURSOR_STYLE_UNDERLINE;
+                                    case 1:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_BLOCK, true);
                                         break;
-                                    case 5: // Blinking bar (xterm addition).
-                                    case 6: // Steady bar (xterm addition).
-                                        mCursorStyle = TERMINAL_CURSOR_STYLE_BAR;
+                                    case 2:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_BLOCK, false);
+                                        break;
+                                    case 3:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_UNDERLINE, true);
+                                        break;
+                                    case 4:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_UNDERLINE, false);
+                                        break;
+                                    case 5:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_BAR, true);
+                                        break;
+                                    case 6:
+                                        applyCursorStyle(TERMINAL_CURSOR_STYLE_BAR, false);
+                                        break;
+                                    default:
                                         break;
                                 }
                                 break;
@@ -1123,6 +1241,21 @@ public final class TerminalEmulator {
                         if (b == 'x' && (attributeChangeExtent >= 0 && attributeChangeExtent <= 2)) {
                             // Select attribute change extent (DECSACE - http://www.vt100.net/docs/vt510-rm/DECSACE).
                             setDecsetinternalBit(DECSET_BIT_RECTANGULAR_CHANGEATTRIBUTE, attributeChangeExtent == 2);
+                        } else if (b == 'y') {
+                            // Request checksum of rectangular area, DECRQCRA. The page argument is ignored.
+                            // Coordinates are relative to the margins in origin mode, like CUP.
+                            boolean rqOrigin = isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE);
+                            int rqRowOffset = originRowOffset();
+                            int rqColOffset = originColOffset();
+                            int rqMaxRow = rqOrigin ? mBottomMargin : mRows;
+                            int rqMaxCol = rqOrigin ? mRightMargin : mColumns;
+                            int rqTop = rqRowOffset + Math.max(1, getArg(2, 1, true));
+                            int rqLeft = rqColOffset + Math.max(1, getArg(3, 1, true));
+                            int rqBottom = Math.min(rqMaxRow, rqRowOffset + getArg(4, rqMaxRow - rqRowOffset, true));
+                            int rqRight = Math.min(rqMaxCol, rqColOffset + getArg(5, rqMaxCol - rqColOffset, true));
+                            int rqSum = sumOfCellsInRect(rqTop - 1, rqLeft - 1, rqBottom, rqRight);
+                            // The reply is the negated 16 bit sum, as on DEC terminals.
+                            mSession.write(String.format(Locale.US, "\033P%d!~%04X\033\\", getArg(0, 0, false), (0x10000 - (rqSum & 0xFFFF)) & 0xFFFF));
                         } else {
                             unknownSequence(b);
                         }
@@ -1175,7 +1308,32 @@ public final class TerminalEmulator {
                         // DECSCL, conformance level, http://www.vt100.net/docs/vt510-rm/DECSCL:
                         String csiString = "64;1\"p";
                         mSession.write("\033P1$r" + csiString + "\033\\");
+                    } else if (dcs.equals("$q q")) {
+                        // DECSCUSR, report the cursor style the same way as xterm.
+                        // Values 1 and 2 are block, 3 and 4 underline, 5 and 6 bar, odd values blink.
+                        int cursorStyleCode = mCursorStyle * 2 + (isCursorBlinking() ? 1 : 2);
+                        mSession.write("\033P1$r" + cursorStyleCode + " q\033\\");
+                    } else if (dcs.equals("$qm")) {
+                        // SGR, the active character attributes and colors. Applications use it to detect true color.
+                        mSession.write("\033P1$r" + currentSgrParameters() + "m\033\\");
+                    } else if (dcs.equals("$q\"q")) {
+                        // DECSCA, the character protection attribute.
+                        mSession.write("\033P1$r" + ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_PROTECTED) != 0 ? 1 : 0) + "\"q\033\\");
+                    } else if (dcs.equals("$q$}")) {
+                        // DECSASD, the main display is always the active one.
+                        mSession.write("\033P1$r0$}\033\\");
+                    } else if (dcs.equals("$q$~")) {
+                        // DECSSDT, there is no status line.
+                        mSession.write("\033P1$r0$~\033\\");
+                    } else if (dcs.equals("$qr")) {
+                        // DECSTBM, top and bottom margins.
+                        mSession.write("\033P1$r" + (mTopMargin + 1) + ";" + mBottomMargin + "r\033\\");
+                    } else if (dcs.equals("$qs")) {
+                        // DECSLRM, left and right margins.
+                        mSession.write("\033P1$r" + (mLeftMargin + 1) + ";" + mRightMargin + "s\033\\");
                     } else {
+                        // An invalid request gets the answer DCS 0 $ r ST.
+                        mSession.write("\033P0$r\033\\");
                         finishSequenceAndLogError("Unrecognized DECRQSS string: '" + dcs + "'");
                     }
                 } else if (dcs.startsWith("+q")) {
@@ -1665,7 +1823,7 @@ public final class TerminalEmulator {
 
     private int nextTabStop(int numTabs) {
         for (int i = mCursorCol + 1; i < mColumns; i++)
-            if (mTabStop[i] && --numTabs == 0) return Math.min(i, mRightMargin);
+            if (mTabStop[i] && --numTabs == 0) return Math.min(i, mRightMargin - 1);
         return mRightMargin - 1;
     }
 
@@ -1737,7 +1895,9 @@ public final class TerminalEmulator {
                 }
                 long style = getStyle();
                 for (int row = startRow; row < endRow; row++) {
-                    for (int col = startCol; col < endCol; col++) {
+                    int firstCol = row == mCursorRow ? startCol : 0;
+                    int lastCol = row == mCursorRow ? endCol : mColumns;
+                    for (int col = firstCol; col < lastCol; col++) {
                         if ((TextStyle.decodeEffect(mScreen.getStyleAt(row, col)) & TextStyle.CHARACTER_ATTRIBUTE_PROTECTED) == 0)
                             mScreen.setChar(col, row, fillChar, style);
                     }
@@ -1753,7 +1913,34 @@ public final class TerminalEmulator {
                 switch (getArg0(-1)) {
                     case 6:
                         // Extended Cursor Position (DECXCPR - http://www.vt100.net/docs/vt510-rm/DECXCPR). Page=1.
-                        mSession.write(String.format(Locale.US, "\033[?%d;%d;1R", mCursorRow + 1, mCursorCol + 1));
+                        mSession.write(String.format(Locale.US, "\033[?%d;%d;1R", mCursorRow + 1 - originRowOffset(), mCursorCol + 1 - originColOffset()));
+                        break;
+                    case 15: // Printer status, 13 means that there is no printer.
+                        mSession.write("\033[?13n");
+                        break;
+                    case 25: // User defined keys status, 20 means that they are unlocked.
+                        mSession.write("\033[?20n");
+                        break;
+                    case 26: // Keyboard status, North American layout, ready, LK201.
+                        mSession.write("\033[?27;1;0;0n");
+                        break;
+                    case 55: // Locator status, 50 means that there is no locator.
+                        mSession.write("\033[?50n");
+                        break;
+                    case 56: // Locator type, 0 means that there is no locator.
+                        mSession.write("\033[?57;0n");
+                        break;
+                    case 62: // Macro space (DECMSR), no macro space is available.
+                        mSession.write("\033[0*{");
+                        break;
+                    case 63: // Memory checksum (DECCKSR), there are no macros so it is always zero.
+                        mSession.write("\033P" + getArg(1, 0, false) + "!~0000\033\\");
+                        break;
+                    case 75: // Data integrity, 70 means that there is no malfunction.
+                        mSession.write("\033[?70n");
+                        break;
+                    case 85: // Multiple session status, 83 means that the terminal is not configured for it.
+                        mSession.write("\033[?83n");
                         break;
                     default:
                         finishSequence();
@@ -1807,7 +1994,13 @@ public final class TerminalEmulator {
                 blockClear(0, 0, mColumns, mRows);
                 setCursorRowCol(0, 0);
                 break;
-            case 4: // DECSCLM-Scrolling Mode. Ignore.
+            case 4: // DECSCLM-Scrolling Mode.
+            case 18: // DECPFF - Print form feed.
+            case 19: // DECPEX - Print extent.
+            case 60: // DECHCCM - Horizontal cursor coupling.
+                // None of these has an effect, they are only remembered.
+                if (setting) mRememberedDecModes |= rememberedDecModeBit(externalBit);
+                else mRememberedDecModes &= ~rememberedDecModeBit(externalBit);
                 break;
             case 5: // Reverse video. No action.
                 break;
@@ -1817,13 +2010,18 @@ public final class TerminalEmulator {
             case 7: // Wrap-around bit, not specific action.
             case 8: // Auto-repeat Keys (DECARM). Do not implement.
             case 9: // X10 mouse reporting - outdated. Do not implement.
-            case 12: // Control cursor blinking - ignore.
+                break;
+            case 12: // Start or stop the blinking cursor, att610.
+                mCursorBlinkRequested = setting;
+                mCursorBlinkState = true;
+                break;
             case 25: // Hide/show cursor - no action needed, renderer will check with shouldCursorBeVisible().
                 if (mClient != null)
                     mClient.onTerminalCursorStateChange(setting);
                 break;
             case 40: // Allow 80 => 132 Mode, ignore.
-            case 45: // TODO: Reverse wrap-around. Implement???
+            case 45: // Reverse wrap-around, the mapped bit is enough.
+            case 1045: // Extended reverse wrap-around, the mapped bit is enough.
             case 66: // Application keypad (DECNKM).
                 break;
             case 69: // Left and right margin mode (DECLRMM).
@@ -1856,9 +2054,12 @@ public final class TerminalEmulator {
                 TerminalBuffer newScreen = setting ? mAltBuffer : mMainBuffer;
                 if (newScreen != mScreen) {
                     boolean resized = !(newScreen.mColumns == mColumns && newScreen.mScreenRows == mRows);
-                    if (setting) saveCursor();
+                    // Modes 47 and 1047 leave the cursor alone, like xterm.
+                    if (setting && externalBit == 1049) saveCursor();
+                    // Mode 1047 clears the alternate screen when it is left.
+                    if (!setting && externalBit == 1047) mScreen.blockSet(0, 0, mColumns, mRows, ' ', getStyle());
                     mScreen = newScreen;
-                    if (!setting) {
+                    if (!setting && externalBit == 1049) {
                         int col = mSavedStateMain.mSavedCursorCol;
                         int row = mSavedStateMain.mSavedCursorRow;
                         restoreCursor();
@@ -1871,7 +2072,8 @@ public final class TerminalEmulator {
                     // Check if buffer size needs to be updated:
                     if (resized) resizeScreen();
                     // Clear new screen if alt buffer:
-                    if (newScreen == mAltBuffer)
+                    // Mode 47 keeps whatever the alternate screen held before.
+                    if (newScreen == mAltBuffer && externalBit != 47)
                         newScreen.blockSet(0, 0, mColumns, mRows, ' ', getStyle());
                 }
                 break;
@@ -1982,7 +2184,8 @@ public final class TerminalEmulator {
             }
         } else {
             if (newCursorRow == mBottomMargin) {
-                scrollDownOneLine();
+                // Outside the left and right margins the cursor stops at the bottom margin instead of scrolling.
+                if (mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) scrollDownOneLine();
                 newCursorRow = mBottomMargin - 1;
             }
             setCursorRow(newCursorRow);
@@ -1997,7 +2200,13 @@ public final class TerminalEmulator {
     private void doEscPound(int b) {
         switch (b) {
             case '8': // Esc # 8 - DEC screen alignment test - fill screen with E's.
+                // xterm also clears origin mode, resets the margins and homes the cursor.
+                setDecsetinternalBit(DECSET_BIT_ORIGIN_MODE, false);
+                mLeftMargin = mTopMargin = 0;
+                mBottomMargin = mRows;
+                mRightMargin = mColumns;
                 mScreen.blockSet(0, 0, mColumns, mRows, 'E', getStyle());
+                setCursorPosition(0, 0);
                 break;
             default:
                 unknownSequence(b);
@@ -2018,7 +2227,10 @@ public final class TerminalEmulator {
                 continueSequence(ESC_SELECT_RIGHT_PAREN);
                 break;
             case '6': // Back index (http://www.vt100.net/docs/vt510-rm/DECBI). Move left, insert blank column if start.
-                if (mCursorCol > mLeftMargin) {
+                if (mCursorCol < mLeftMargin || mCursorCol >= mRightMargin) {
+                    // Outside the margins this is a plain cursor move.
+                    setCursorCol(Math.max(0, mCursorCol - 1));
+                } else if (mCursorCol > mLeftMargin) {
                     mCursorCol--;
                 } else {
                     int rows = mBottomMargin - mTopMargin;
@@ -2033,13 +2245,18 @@ public final class TerminalEmulator {
                 restoreCursor();
                 break;
             case '9': // Forward Index (http://www.vt100.net/docs/vt510-rm/DECFI). Move right, insert blank column if end.
-                if (mCursorCol < mRightMargin - 1) {
+                if (mCursorCol < mLeftMargin || mCursorCol >= mRightMargin) {
+                    setCursorCol(Math.min(mColumns - 1, mCursorCol + 1));
+                } else if (mCursorCol < mRightMargin - 1) {
                     mCursorCol++;
                 } else {
                     int rows = mBottomMargin - mTopMargin;
                     mScreen.blockCopy(mLeftMargin + 1, mTopMargin, mRightMargin - mLeftMargin - 1, rows, mLeftMargin, mTopMargin);
                     mScreen.blockSet(mRightMargin - 1, mTopMargin, 1, rows, ' ', TextStyle.encode(mForeColor, mBackColor, 0));
                 }
+                break;
+            case 'Z': // DECID - Identify Terminal (http://vt100.net/docs/vt510-rm/DECID), the same as DA1.
+                mSession.write(PRIMARY_DEVICE_ATTRIBUTES);
                 break;
             case 'c': // RIS - Reset to Initial State (http://vt100.net/docs/vt510-rm/RIS).
                 reset();
@@ -2051,8 +2268,9 @@ public final class TerminalEmulator {
                 doLinefeed();
                 break;
             case 'E': // Next line (http://www.vt100.net/docs/vt510-rm/NEL).
-                setCursorCol(isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE) ? mLeftMargin : 0);
+                // The old column decides about scrolling, so move down first.
                 doLinefeed();
+                carriageReturn();
                 break;
             case 'F': // Cursor to lower-left corner of screen
                 setCursorRowCol(0, mBottomMargin - 1);
@@ -2063,11 +2281,12 @@ public final class TerminalEmulator {
             case 'M': // "${ESC}M" - reverse index (RI).
                 // http://www.vt100.net/docs/vt100-ug/chapter3.html: "Move the active position to the same horizontal
                 // position on the preceding line. If the active position is at the top margin, a scroll down is performed".
-                if (mCursorRow <= mTopMargin) {
+                if (mCursorRow == mTopMargin && mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
                     mScreen.blockCopy(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin, mBottomMargin - (mTopMargin + 1), mLeftMargin, mTopMargin + 1);
                     blockClear(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin);
                 } else {
-                    mCursorRow--;
+                    // Above the top margin the cursor can go up to the first row, otherwise it stops at the top margin.
+                    setCursorRow(Math.max(mCursorRow >= mTopMargin ? mTopMargin : 0, mCursorRow - 1));
                 }
                 break;
             case 'N': // SS2, ignore.
@@ -2092,6 +2311,8 @@ public final class TerminalEmulator {
             case '>': // DECKPNM
                 setDecsetinternalBit(DECSET_BIT_APPLICATION_KEYPAD, false);
                 break;
+            case '^': // PM - Privacy Message. The string is ignored like APC.
+            case 'X': // SOS - Start Of String. The string is ignored like APC.
             case '_': // APC - Application Program Command.
                 clearTerminalControlArgs();
                 continueSequence(ESC_APC);
@@ -2110,10 +2331,12 @@ public final class TerminalEmulator {
         state.mSavedEffect = mEffect;
         state.mSavedForeColor = mForeColor;
         state.mSavedBackColor = mBackColor;
+        state.mSavedUnderlineColor = mUnderlineColor;
         state.mSavedDecFlags = mCurrentDecSetFlags;
         state.mUseLineDrawingG0 = mUseLineDrawingG0;
         state.mUseLineDrawingG1 = mUseLineDrawingG1;
         state.mUseLineDrawingUsesG0 = mUseLineDrawingUsesG0;
+        state.mSavedAboutToAutoWrap = mAboutToAutoWrap;
     }
 
     /** DECRS restore cursor - http://www.vt100.net/docs/vt510-rm/DECRC. See {@link #saveCursor()}. */
@@ -2123,11 +2346,16 @@ public final class TerminalEmulator {
         mEffect = state.mSavedEffect;
         mForeColor = state.mSavedForeColor;
         mBackColor = state.mSavedBackColor;
-        int mask = (DECSET_BIT_AUTOWRAP | DECSET_BIT_ORIGIN_MODE);
+        mUnderlineColor = state.mSavedUnderlineColor;
+        // Only the pending wrap flag and origin mode are restored, auto wrap mode itself is not.
+        int mask = DECSET_BIT_ORIGIN_MODE;
         mCurrentDecSetFlags = (mCurrentDecSetFlags & ~mask) | (state.mSavedDecFlags & mask);
         mUseLineDrawingG0 = state.mUseLineDrawingG0;
         mUseLineDrawingG1 = state.mUseLineDrawingG1;
         mUseLineDrawingUsesG0 = state.mUseLineDrawingUsesG0;
+        // Must come after setCursorRowCol because that call clears the flag.
+        // It is only valid while the cursor is still in the last column.
+        mAboutToAutoWrap = state.mSavedAboutToAutoWrap && mCursorCol == mRightMargin - 1;
     }
 
     /** Following a CSI - Control Sequence Introducer, "\033[". {@link #ESC_CSI}. */
@@ -2151,34 +2379,44 @@ public final class TerminalEmulator {
             case '@': {
                 // "CSI{n}@" - Insert ${n} space characters (ICH) - http://www.vt100.net/docs/vt510-rm/ICH.
                 mAboutToAutoWrap = false;
-                int columnsAfterCursor = mColumns - mCursorCol;
-                int spacesToInsert = Math.min(getArg0(1), columnsAfterCursor);
-                int charsToMove = columnsAfterCursor - spacesToInsert;
-                mScreen.blockCopy(mCursorCol, mCursorRow, charsToMove, 1, mCursorCol + spacesToInsert, mCursorRow);
-                blockClear(mCursorCol, mCursorRow, spacesToInsert);
+                if (mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
+                    int columnsAfterCursor = mRightMargin - mCursorCol;
+                    int spacesToInsert = Math.min(getArg0(1), columnsAfterCursor);
+                    int charsToMove = columnsAfterCursor - spacesToInsert;
+                    mScreen.blockCopy(mCursorCol, mCursorRow, charsToMove, 1, mCursorCol + spacesToInsert, mCursorRow);
+                    blockClear(mCursorCol, mCursorRow, spacesToInsert);
+                }
             }
             break;
             case 'A': // "CSI${n}A" - Cursor up (CUU) ${n} rows.
-                setCursorRow(Math.max(0, mCursorRow - getArg0(1)));
+                moveCursorUp(getArg0(1));
                 break;
             case 'B': // "CSI${n}B" - Cursor down (CUD) ${n} rows.
-                setCursorRow(Math.min(mRows - 1, mCursorRow + getArg0(1)));
+                moveCursorDown(getArg0(1));
                 break;
             case 'C': // "CSI${n}C" - Cursor forward (CUF).
             case 'a': // "CSI${n}a" - Horizontal position relative (HPR). From ISO-6428/ECMA-48.
-                setCursorCol(Math.min(mRightMargin - 1, mCursorCol + getArg0(1)));
+                // Stop at the right margin when starting inside the margins, otherwise at the screen edge.
+                setCursorCol(Math.min(mCursorCol < mRightMargin ? mRightMargin - 1 : mColumns - 1, mCursorCol + getArg0(1)));
                 break;
             case 'D': // "CSI${n}D" - Cursor backward (CUB) ${n} columns.
-                setCursorCol(Math.max(mLeftMargin, mCursorCol - getArg0(1)));
+                cursorBack(getArg0(1));
                 break;
             case 'E': // "CSI{n}E - Cursor Next Line (CNL). From ISO-6428/ECMA-48.
-                setCursorPosition(0, mCursorRow + getArg0(1));
+                moveCursorDown(getArg0(1));
+                carriageReturn();
                 break;
             case 'F': // "CSI{n}F - Cursor Previous Line (CPL). From ISO-6428/ECMA-48.
-                setCursorPosition(0, mCursorRow - getArg0(1));
+                moveCursorUp(getArg0(1));
+                carriageReturn();
                 break;
             case 'G': // "CSI${n}G" - Cursor horizontal absolute (CHA) to column ${n}.
-                setCursorCol(Math.min(Math.max(1, getArg0(1)), mColumns) - 1);
+                // In origin mode the column is relative to the left margin and cannot leave the margins.
+                if (isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE)) {
+                    setCursorCol(Math.min(mLeftMargin + getArg0(1) - 1, mRightMargin - 1));
+                } else {
+                    setCursorCol(Math.min(Math.max(1, getArg0(1)), mColumns) - 1);
+                }
                 break;
             case 'H': // "${CSI}${ROW};${COLUMN}H" - Cursor position (CUP).
             case 'f': // "${CSI}${ROW};${COLUMN}f" - Horizontal and Vertical Position (HVP).
@@ -2230,21 +2468,28 @@ public final class TerminalEmulator {
                 break;
             case 'L': // "${CSI}{N}L" - insert ${N} lines (IL).
             {
-                int linesAfterCursor = mBottomMargin - mCursorRow;
-                int linesToInsert = Math.min(getArg0(1), linesAfterCursor);
-                int linesToMove = linesAfterCursor - linesToInsert;
-                mScreen.blockCopy(0, mCursorRow, mColumns, linesToMove, 0, mCursorRow + linesToInsert);
-                blockClear(0, mCursorRow, mColumns, linesToInsert);
+                // Only inside the top, bottom, left and right margins, and only the columns between the margins move.
+                if (mCursorRow >= mTopMargin && mCursorRow < mBottomMargin && mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
+                    int width = mRightMargin - mLeftMargin;
+                    int linesAfterCursor = mBottomMargin - mCursorRow;
+                    int linesToInsert = Math.min(getArg0(1), linesAfterCursor);
+                    int linesToMove = linesAfterCursor - linesToInsert;
+                    mScreen.blockCopy(mLeftMargin, mCursorRow, width, linesToMove, mLeftMargin, mCursorRow + linesToInsert);
+                    blockClear(mLeftMargin, mCursorRow, width, linesToInsert);
+                }
             }
             break;
             case 'M': // "${CSI}${N}M" - delete N lines (DL).
             {
                 mAboutToAutoWrap = false;
-                int linesAfterCursor = mBottomMargin - mCursorRow;
-                int linesToDelete = Math.min(getArg0(1), linesAfterCursor);
-                int linesToMove = linesAfterCursor - linesToDelete;
-                mScreen.blockCopy(0, mCursorRow + linesToDelete, mColumns, linesToMove, 0, mCursorRow);
-                blockClear(0, mCursorRow + linesToMove, mColumns, linesToDelete);
+                if (mCursorRow >= mTopMargin && mCursorRow < mBottomMargin && mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
+                    int width = mRightMargin - mLeftMargin;
+                    int linesAfterCursor = mBottomMargin - mCursorRow;
+                    int linesToDelete = Math.min(getArg0(1), linesAfterCursor);
+                    int linesToMove = linesAfterCursor - linesToDelete;
+                    mScreen.blockCopy(mLeftMargin, mCursorRow + linesToDelete, width, linesToMove, mLeftMargin, mCursorRow);
+                    blockClear(mLeftMargin, mCursorRow + linesToMove, width, linesToDelete);
+                }
             }
             break;
             case 'P': // "${CSI}{N}P" - delete ${N} characters (DCH).
@@ -2255,11 +2500,13 @@ public final class TerminalEmulator {
                 // Character attributes move with the characters. The terminal adds blank spaces with no visual character
                 // attributes at the right margin. DCH has no effect outside the scrolling margins."
                 mAboutToAutoWrap = false;
-                int cellsAfterCursor = mColumns - mCursorCol;
-                int cellsToDelete = Math.min(getArg0(1), cellsAfterCursor);
-                int cellsToMove = cellsAfterCursor - cellsToDelete;
-                mScreen.blockCopy(mCursorCol + cellsToDelete, mCursorRow, cellsToMove, 1, mCursorCol, mCursorRow);
-                blockClear(mCursorCol + cellsToMove, mCursorRow, cellsToDelete);
+                if (mCursorCol >= mLeftMargin && mCursorCol < mRightMargin) {
+                    int cellsAfterCursor = mRightMargin - mCursorCol;
+                    int cellsToDelete = Math.min(getArg0(1), cellsAfterCursor);
+                    int cellsToMove = cellsAfterCursor - cellsToDelete;
+                    mScreen.blockCopy(mCursorCol + cellsToDelete, mCursorRow, cellsToMove, 1, mCursorCol, mCursorRow);
+                    blockClear(mCursorCol + cellsToMove, mCursorRow, cellsToDelete);
+                }
             }
             break;
             case 'S': { // "${CSI}${N}S" - scroll up ${N} lines (default = 1) (SU).
@@ -2290,15 +2537,15 @@ public final class TerminalEmulator {
                 break;
             case 'Z': // Cursor Backward Tabulation (CBT). Move the active position n tabs backward.
                 int numberOfTabs = getArg0(1);
-                int newCol = mLeftMargin;
+                int newCol = 0;
                 for (int i = mCursorCol - 1; i >= 0; i--)
                     if (mTabStop[i]) {
                         if (--numberOfTabs == 0) {
-                            newCol = Math.max(i, mLeftMargin);
+                            newCol = i;
                             break;
                         }
                     }
-                mCursorCol = newCol;
+                setCursorCol(newCol);
                 break;
             case '?': // Esc [ ? -- start of a private parameter byte
                 continueSequence(ESC_CSI_QUESTIONMARK);
@@ -2322,13 +2569,14 @@ public final class TerminalEmulator {
                 // The important part that may still be used by some (tmux stores this value but does not currently use it)
                 // is the first response parameter identifying the terminal service class, where we send 64 for "vt420".
                 // This is followed by a list of attributes which is probably unused by applications. Send like xterm.
-                if (getArg0(0) == 0) mSession.write("\033[?64;1;2;4;6;9;15;18;21;22c");
+                if (getArg0(0) == 0) mSession.write(PRIMARY_DEVICE_ATTRIBUTES);
                 break;
             case 'd': // ESC [ Pn d - Vert Position Absolute
-                setCursorRow(Math.min(Math.max(1, getArg0(1)), mRows) - 1);
+                // Relative to the margins in origin mode, like CUP.
+                setCursorPosition(mCursorCol - originColOffset(), Math.max(1, getArg0(1)) - 1);
                 break;
             case 'e': // Vertical Position Relative (VPR). From ISO-6429 (ECMA-48).
-                setCursorPosition(mCursorCol, mCursorRow + getArg0(1));
+                setCursorPosition(mCursorCol - originColOffset(), mCursorRow - originRowOffset() + getArg0(1));
                 break;
             // case 'f': "${CSI}${ROW};${COLUMN}f" - Horizontal and Vertical Position (HVP). Grouped with case 'H'.
             case 'g': // Clear tab stop
@@ -2366,7 +2614,7 @@ public final class TerminalEmulator {
                     case 6: // Cursor position report (CPR):
                         // Answer is ESC [ y ; x R, where x,y is
                         // the cursor location.
-                        mSession.write(String.format(Locale.US, "\033[%d;%dR", mCursorRow + 1, mCursorCol + 1));
+                        mSession.write(String.format(Locale.US, "\033[%d;%dR", mCursorRow + 1 - originRowOffset(), mCursorCol + 1 - originColOffset()));
                         break;
                     default:
                         break;
@@ -2380,12 +2628,16 @@ public final class TerminalEmulator {
                 // The escape sequence numbers bottom 2..24, and so do we (because we use a zero based numbering
                 // scheme, but we store the first line below the bottom-most scrolling line.
                 // As a result, we adjust the top line by -1, but we leave the bottom line alone.
-                // Also require that top + 2 <= bottom.
-                mTopMargin = Math.max(0, Math.min(getArg0(1) - 1, mRows - 2));
-                mBottomMargin = Math.max(mTopMargin + 2, Math.min(getArg1(mRows), mRows));
+                // A request with the bottom not below the top is ignored completely.
+                int requestedTop = getArg0(1);
+                int requestedBottom = Math.min(getArg1(mRows), mRows);
+                if (requestedBottom > requestedTop) {
+                    mTopMargin = requestedTop - 1;
+                    mBottomMargin = requestedBottom;
 
-                // DECSTBM moves the cursor to column 1, line 1 of the page respecting origin mode.
-                setCursorPosition(0, 0);
+                    // DECSTBM moves the cursor to column 1, line 1 of the page respecting origin mode.
+                    setCursorPosition(0, 0);
+                }
             }
             break;
             case 's':
@@ -2477,6 +2729,7 @@ public final class TerminalEmulator {
             if (code == 0) { // reset
                 mForeColor = TextStyle.COLOR_INDEX_FOREGROUND;
                 mBackColor = TextStyle.COLOR_INDEX_BACKGROUND;
+                mUnderlineColor = TextStyle.COLOR_INDEX_FOREGROUND;
                 mEffect = 0;
             } else if (code == 1) {
                 mEffect |= TextStyle.CHARACTER_ATTRIBUTE_BOLD;
@@ -2798,8 +3051,13 @@ public final class TerminalEmulator {
                                 unknownSequence(b);
                                 return;
                             } else {
-                                mColors.tryParseColor(colorIndex, textParameter.substring(parsingPairStart, i));
-                                mSession.onColorsChanged();
+                                String pairSpec = textParameter.substring(parsingPairStart, i);
+                                if ("?".equals(pairSpec)) {
+                                    mSession.write("\033]4;" + colorIndex + ";" + formatColorReport(mColors.mCurrentColors[colorIndex]) + bellOrStringTerminator);
+                                } else {
+                                    mColors.tryParseColor(colorIndex, pairSpec);
+                                    mSession.onColorsChanged();
+                                }
                                 colorIndex = -1;
                                 parsingPairStart = -1;
                             }
@@ -2831,7 +3089,7 @@ public final class TerminalEmulator {
                                 int r = (65535 * ((rgb & 0x00FF0000) >> 16)) / 255;
                                 int g = (65535 * ((rgb & 0x0000FF00) >> 8)) / 255;
                                 int b = (65535 * ((rgb & 0x000000FF))) / 255;
-                                mSession.write("\033]" + value + ";rgb:" + String.format(Locale.US, "%04x", r) + "/" + String.format(Locale.US, "%04x", g) + "/"
+                                mSession.write("\033]" + (10 + specialIndex - TextStyle.COLOR_INDEX_FOREGROUND) + ";rgb:" + String.format(Locale.US, "%04x", r) + "/" + String.format(Locale.US, "%04x", g) + "/"
                                     + String.format(Locale.US, "%04x", b) + bellOrStringTerminator);
                             } else {
                                 mColors.tryParseColor(specialIndex, colorSpec);
@@ -3026,6 +3284,13 @@ public final class TerminalEmulator {
         return TextStyle.encode(mForeColor, mBackColor, mEffect);
     }
 
+    /** The color of the underline of the text that is written now as opaque ARGB, or 0 for the foreground color. */
+    private int currentUnderlineColor() {
+        if ((mEffect & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) == 0 || mUnderlineColor == TextStyle.COLOR_INDEX_FOREGROUND) return 0;
+        int color = (mUnderlineColor & 0xff000000) == 0xff000000 ? mUnderlineColor : mColors.mCurrentColors[mUnderlineColor];
+        return color | 0xff000000;
+    }
+
     /** "CSI P_m h" for set or "CSI P_m l" for reset ANSI mode. */
     private void doSetMode(boolean newValue) {
         int modeBit = getArg0(0);
@@ -3033,9 +3298,9 @@ public final class TerminalEmulator {
             case 4: // Set="Insert Mode". Reset="Replace Mode". (IRM).
                 mInsertMode = newValue;
                 break;
-            case 20: // Normal Linefeed (LNM).
-                unknownParameter(modeBit);
+            case 20: // Set is New Line, reset is Normal Linefeed, LNM.
                 // http://www.vt100.net/docs/vt510-rm/LNM
+                mLinefeedMode = newValue;
                 break;
             case 34:
                 // Normal cursor visibility - when using TERM=screen, see
@@ -3425,12 +3690,134 @@ public final class TerminalEmulator {
         // so was mCursorCol changed after the offsetDueToCombiningChar conditional by another thread?
         // TODO: Check if there are thread synchronization issues with mCursorCol and mCursorRow, possibly causing others bugs too.
         if (column < 0) column = 0;
-        mScreen.setChar(column, mCursorRow, codePoint, getStyle());
+        mScreen.setChar(column, mCursorRow, codePoint, getStyle(), currentUnderlineColor());
 
         if (autoWrap && displayWidth > 0)
             mAboutToAutoWrap = (mCursorCol == mRightMargin - displayWidth);
 
         mCursorCol = Math.min(mCursorCol + displayWidth, mRightMargin - 1);
+    }
+
+    /** Format a color as the 16 bit per channel text used in xterm color reports. */
+    private static String formatColorReport(int rgb) {
+        int r = (65535 * ((rgb >> 16) & 0xFF)) / 255;
+        int g = (65535 * ((rgb >> 8) & 0xFF)) / 255;
+        int b = (65535 * (rgb & 0xFF)) / 255;
+        return String.format(Locale.US, "rgb:%04x/%04x/%04x", r, g, b);
+    }
+
+    /** Move up, stopping at the top margin when the cursor starts inside the scroll region. */
+    private void moveCursorUp(int rows) {
+        int limit = mCursorRow >= mTopMargin ? mTopMargin : 0;
+        setCursorRow(Math.max(limit, mCursorRow - rows));
+    }
+
+    /** Move down, stopping at the bottom margin when the cursor starts inside the scroll region. */
+    private void moveCursorDown(int rows) {
+        int limit = mCursorRow < mBottomMargin ? mBottomMargin - 1 : mRows - 1;
+        setCursorRow(Math.min(limit, mCursorRow + rows));
+    }
+
+    /** Go to the left margin, or to the screen edge when left of the margin and origin mode is off. */
+    private void carriageReturn() {
+        boolean originMode = isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE);
+        setCursorCol(originMode || mCursorCol >= mLeftMargin ? mLeftMargin : 0);
+    }
+
+    /** Rows above the origin, which is not zero only in origin mode. */
+    private int originRowOffset() {
+        return isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE) ? mTopMargin : 0;
+    }
+
+    /** Columns left of the origin, which is not zero only in origin mode. */
+    private int originColOffset() {
+        return isDecsetInternalBitSet(DECSET_BIT_ORIGIN_MODE) ? mLeftMargin : 0;
+    }
+
+    /**
+     * Sum of the code points of the cells in a rectangle, as DECRQCRA reports it.
+     * Rows and columns are zero based and the end bounds are exclusive.
+     */
+    private int sumOfCellsInRect(int top, int left, int bottom, int right) {
+        int sum = 0;
+        for (int row = top; row < bottom; row++) {
+            TerminalRow line = mScreen.allocateFullLineIfNecessary(mScreen.externalToInternalRow(row));
+            for (int col = left; col < right; col++) {
+                int start = line.findStartOfColumn(col);
+                int end = (col + 1 < mColumns) ? line.findStartOfColumn(col + 1) : line.getSpaceUsed();
+                for (int i = start; i < end; ) {
+                    int codePoint = Character.codePointAt(line.mText, i);
+                    sum += codePoint;
+                    i += Character.charCount(codePoint);
+                }
+            }
+        }
+        return sum;
+    }
+
+    /**
+     * Move the cursor backward the way xterm does, see CursorBack in xterm cursor.c.
+     * Reverse wrap-around needs autowrap. Mode 45 wraps only to lines that were wrapped,
+     * mode 1045 wraps to any line, and from the top margin to the bottom margin.
+     */
+    private void cursorBack(int n) {
+        boolean autoWrap = isDecsetInternalBitSet(DECSET_BIT_AUTOWRAP);
+        boolean rev = autoWrap && isDecsetInternalBitSet(DECSET_BIT_REVERSE_WRAP);
+        boolean rev2 = autoWrap && isDecsetInternalBitSet(DECSET_BIT_REVERSE_WRAP_EXTENDED);
+        int left = mLeftMargin;
+        int right = mRightMargin - 1;
+        int top = mTopMargin;
+        int bottom = mBottomMargin - 1;
+        int col = mCursorCol;
+        int row = mCursorRow;
+        // A cursor that is already left of the left margin may go to the screen edge.
+        if (mCursorCol < left) left = 0;
+
+        boolean lineChecked = false;
+        int count = n;
+        if (count > 0) {
+            if ((rev || rev2) && mAboutToAutoWrap) {
+                // The cursor is in the pending wrap position, so the first step only cancels it.
+                count--;
+            } else {
+                col--;
+            }
+        }
+
+        for (;;) {
+            if (col < left) {
+                if (rev2) {
+                    col = right;
+                    if (row == top) row = bottom + 1;
+                } else if (!rev) {
+                    col = left;
+                    break;
+                }
+                lineChecked = false;
+                row--;
+            }
+            if (!lineChecked) {
+                lineChecked = true;
+                if (row < 0) {
+                    // Nothing above the first row to wrap to.
+                    row = 0;
+                    col = left;
+                    break;
+                }
+                if (row != mCursorRow) {
+                    if (!rev2 && !mScreen.getLineWrap(row)) {
+                        // The reverse wrap failed because the line above was not wrapped.
+                        if (row < bottom) row++;
+                        col = left;
+                        break;
+                    }
+                    col = right;
+                }
+            }
+            if (--count <= 0) break;
+            col--;
+        }
+        setCursorRowCol(row, col);
     }
 
     private void setCursorRow(int row) {
@@ -3485,16 +3872,23 @@ public final class TerminalEmulator {
     /** Reset terminal state so user can interact with it regardless of present state. */
     public void reset() {
         setCursorStyle();
+        mCursorBlinkRequested = null;
+        mCursorStyleRequested = false;
+        mCursorBlinkState = true;
         mArgIndex = 0;
         mContinueSequence = false;
         mEscapeState = ESC_NONE;
         mInsertMode = false;
+        mLinefeedMode = false;
+        mEffect = 0;
+        mRememberedDecModes = 0;
         mTopMargin = mLeftMargin = 0;
         mBottomMargin = mRows;
         mRightMargin = mColumns;
         mAboutToAutoWrap = false;
         mForeColor = mSavedStateMain.mSavedForeColor = mSavedStateAlt.mSavedForeColor = TextStyle.COLOR_INDEX_FOREGROUND;
         mBackColor = mSavedStateMain.mSavedBackColor = mSavedStateAlt.mSavedBackColor = TextStyle.COLOR_INDEX_BACKGROUND;
+        mUnderlineColor = mSavedStateMain.mSavedUnderlineColor = mSavedStateAlt.mSavedUnderlineColor = TextStyle.COLOR_INDEX_FOREGROUND;
         setDefaultTabStops();
 
         mUseLineDrawingG0 = mUseLineDrawingG1 = false;
@@ -3502,6 +3896,7 @@ public final class TerminalEmulator {
 
         mSavedStateMain.mSavedCursorRow = mSavedStateMain.mSavedCursorCol = mSavedStateMain.mSavedEffect = mSavedStateMain.mSavedDecFlags = 0;
         mSavedStateAlt.mSavedCursorRow = mSavedStateAlt.mSavedCursorCol = mSavedStateAlt.mSavedEffect = mSavedStateAlt.mSavedDecFlags = 0;
+        mSavedStateMain.mSavedAboutToAutoWrap = mSavedStateAlt.mSavedAboutToAutoWrap = false;
         mCurrentDecSetFlags = 0;
         // Initial wrap-around is not accurate but makes terminal more useful, especially on a small screen:
         setDecsetinternalBit(DECSET_BIT_AUTOWRAP, true);
@@ -3555,8 +3950,9 @@ public final class TerminalEmulator {
     static final class SavedScreenState {
         /** Saved state of the cursor position, Used to implement the save/restore cursor position escape sequences. */
         int mSavedCursorRow, mSavedCursorCol;
-        int mSavedEffect, mSavedForeColor, mSavedBackColor;
+        int mSavedEffect, mSavedForeColor, mSavedBackColor, mSavedUnderlineColor;
         int mSavedDecFlags;
+        boolean mSavedAboutToAutoWrap;
         boolean mUseLineDrawingG0, mUseLineDrawingG1, mUseLineDrawingUsesG0 = true;
     }
 
