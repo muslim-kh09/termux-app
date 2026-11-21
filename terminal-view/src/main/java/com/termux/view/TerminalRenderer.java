@@ -695,9 +695,8 @@ public final class TerminalRenderer {
                 mTextSize, mTypeface, mFontWidth, altBuffer);
     }
 
-    /** Renders the terminal into {@code canvas}, starting at {@code topRow} with an optional selection range. */
-    /** The colors of the underline slots in cell styles, set by {@link #render}. */
-    private int[] mUnderlineSlotColors;
+    /** The row that is drawn, it maps the underline slots of its cell styles to colors. Only set while {@link #render} runs. */
+    private TerminalRow mUnderlineRow;
 
     /** The underline color of the cell that was configured last by configurePaintForCell, 0 for the text color. */
     private int mCellUnderlineColor;
@@ -706,9 +705,8 @@ public final class TerminalRenderer {
 
     /** The color of the underline for a style, or 0 if the underline is not colored. */
     private int underlineColorOf(long style, int effect) {
-        if ((effect & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) == 0 || mUnderlineSlotColors == null) return 0;
-        int slot = TextStyle.decodeUnderlineSlot(style);
-        return slot == 0 ? 0 : mUnderlineSlotColors[slot];
+        if ((effect & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) == 0 || mUnderlineRow == null) return 0;
+        return mUnderlineRow.getUnderlineColor(style);
     }
 
     /** Draws an underline of its own color, the underline of the text paint can only have the text color. */
@@ -720,6 +718,7 @@ public final class TerminalRenderer {
         canvas.drawRect(left, top, right, top + Math.max(1f, textSize / 18f), mUnderlinePaint);
     }
 
+    /** Renders the terminal into {@code canvas}, starting at {@code topRow} with an optional selection range. */
     public final void render(TerminalEmulator mEmulator, Canvas canvas, int topRow,
                              int selectionY1, int selectionY2, int selectionX1, int selectionX2) {
         final boolean reverseVideo = mEmulator.isReverseVideo();
@@ -730,7 +729,6 @@ public final class TerminalRenderer {
         final boolean cursorVisible = mEmulator.shouldCursorBeVisible();
         final TerminalBuffer screen = mEmulator.getScreen();
         final int[] palette = mEmulator.mColors.mCurrentColors;
-        mUnderlineSlotColors = mEmulator.getUnderlineSlotColors();
         final int cursorShape = mEmulator.getCursorStyle();
         final boolean altBuffer = mEmulator.isAlternateBufferActive();
 
@@ -773,6 +771,8 @@ public final class TerminalRenderer {
                 continue;
             }
 
+            mUnderlineRow = lineObject;
+
             if (!lineObject.mMayContainRtlOrBidi && paragraphDir != BidiLayout.DIR_RTL) {
                 renderPureLtrRow(lineObject, screen, canvas, palette, columns,
                         cursorX, selx1, selx2, cursorShape, reverseVideo, heightOffset);
@@ -798,6 +798,7 @@ public final class TerminalRenderer {
             paragraphDir = wrapped ? layout.resolvedBaseDirection : BidiLayout.DIR_DEFAULT;
             paragraphStartsWithPrompt = wrapped && layout.paragraphStartsWithPrompt;
         }
+        mUnderlineRow = null;
     }
 
     /** Zero-allocation fast path matching upstream Termux performance for pure LTR rows. */

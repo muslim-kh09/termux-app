@@ -39,8 +39,9 @@ public final class TextStyle {
     public final static int TERMINAL_BITMAP = 1 << 15;
 
     /**
-     * The underline color does not fit in the cell style, so the style holds a slot number instead. The emulator maps
-     * the slot to a color, see {@link TerminalEmulator#getUnderlineSlotColors()}. Slot 0 means the foreground color.
+     * The underline color does not fit in the cell style, so the style holds a slot number instead. The slot is local
+     * to the row of the cell, the row maps it to a color, see {@link TerminalRow#getUnderlineColor(long)}. Slot 0 means
+     * the foreground color. A style must only be used again in the row it came from, or together with its color.
      */
     public final static int UNDERLINE_SLOT_SHIFT = 11;
     public final static int UNDERLINE_SLOT_MASK = 0xf;
