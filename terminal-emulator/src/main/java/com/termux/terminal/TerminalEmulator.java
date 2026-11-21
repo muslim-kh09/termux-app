@@ -1847,6 +1847,33 @@ public final class TerminalEmulator {
                         // Extended Cursor Position (DECXCPR - http://www.vt100.net/docs/vt510-rm/DECXCPR). Page=1.
                         mSession.write(String.format(Locale.US, "\033[?%d;%d;1R", mCursorRow + 1 - originRowOffset(), mCursorCol + 1 - originColOffset()));
                         break;
+                    case 15: // Printer status, 13 means that there is no printer.
+                        mSession.write("\033[?13n");
+                        break;
+                    case 25: // User defined keys status, 20 means that they are unlocked.
+                        mSession.write("\033[?20n");
+                        break;
+                    case 26: // Keyboard status, North American layout, ready, LK201.
+                        mSession.write("\033[?27;1;0;0n");
+                        break;
+                    case 55: // Locator status, 50 means that there is no locator.
+                        mSession.write("\033[?50n");
+                        break;
+                    case 56: // Locator type, 0 means that there is no locator.
+                        mSession.write("\033[?57;0n");
+                        break;
+                    case 62: // Macro space (DECMSR), no macro space is available.
+                        mSession.write("\033[0*{");
+                        break;
+                    case 63: // Memory checksum (DECCKSR), there are no macros so it is always zero.
+                        mSession.write("\033P" + getArg(1, 0, false) + "!~0000\033\\");
+                        break;
+                    case 75: // Data integrity, 70 means that there is no malfunction.
+                        mSession.write("\033[?70n");
+                        break;
+                    case 85: // Multiple session status, 83 means that the terminal is not configured for it.
+                        mSession.write("\033[?83n");
+                        break;
                     default:
                         finishSequence();
                         return;
